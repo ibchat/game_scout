@@ -1,0 +1,34 @@
+[tool.poetry]
+name = "game_scout"
+version = "1.0.0"
+description = "Game trend scout and pitch viability engine"
+authors = ["Game Scout Team"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = "^0.109.0"
+uvicorn = {extras = ["standard"], version = "^0.27.0"}
+sqlalchemy = "^2.0.25"
+alembic = "^1.13.1"
+psycopg = {extras = ["binary"], version = "^3.1.16"}
+redis = "^5.0.1"
+celery = {extras = ["redis"], version = "^5.3.6"}
+pydantic = {extras = ["email"], version = "^2.5.3"}
+pydantic-settings = "^2.1.0"
+httpx = "^0.26.0"
+beautifulsoup4 = "^4.12.3"
+pandas = "^2.1.4"
+google-api-python-client = "^2.115.0"
+gspread = "^6.0.2"
+python-dotenv = "^1.0.0"
+tenacity = "^8.2.3"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.4"
+pytest-asyncio = "^0.23.3"
+pytest-mock = "^3.12.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

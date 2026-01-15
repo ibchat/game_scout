@@ -1,0 +1,36 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from apps.api.routers import health, pitches, trends, games
+
+app = FastAPI(
+    title="Game Scout API",
+    description="Game trend scout and pitch viability engine",
+    version="1.0.0"
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(health.router, tags=["Health"])
+app.include_router(pitches.router, prefix="/pitches", tags=["Pitches"])
+app.include_router(trends.router, prefix="/trends", tags=["Trends"])
+app.include_router(games.router, prefix="/games", tags=["Games"])
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Startup tasks"""
+    pass
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Shutdown tasks"""
+    pass

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Game Scout - Trend Analytics</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, sans-serif;
+            background: #1a1d23;
+            color: #e8eaed;
+            padding: 20px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header {
+            background: #2d3139;
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        .tab {
+            padding: 12px 24px;
+            background: #2d3139;
+            border-radius: 10px;
+            cursor: pointer;
+            color: #9aa0a6;
+        }
+        .tab.active { background: #4a9eff; color: white; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .card {
+            background: #2d3139;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        .insights-box {
+            background: linear-gradient(135deg, rgba(255,107,53,0.1), rgba(255,107,53,0.05));
+            padding: 25px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            border: 1px solid rgba(255,107,53,0.3);
+        }
+        .insight-item {
+            background: rgba(0,0,0,0.2);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            border-left: 3px solid #ff6b35;
+        }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 15px; }
+        .content-card {
+            background: #3f4451;
+            padding: 16px;
+            border-radius: 10px;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            margin: 3px;
+        }
+        .badge-reddit { background: rgba(255,107,53,0.2); color: #ff6b35; }
+        .btn {
+            padding: 10px 20px;
+            background: #ff6b35;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 Game Scout</h1>
+            <p>Платформа Инвестиционной Аналитики</p>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('reddit')">🔶 Reddit</div>
+        </div>
+
+        <div id="reddit-tab" class="tab-content active">
+            <div class="card">
+                <h2>🔶 Reddit Gaming Communities</h2>
+                <button class="btn" onclick="collectReddit()">🔄 Собрать Reddit</button>
+                <button class="btn" onclick="analyzeReddit()">📊 Анализировать</button>
+                <div id="reddit-insights"></div>
+                <div id="reddit-posts" class="grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById(tab + '-tab').classList.add('active');
+            loadReddit();
+        }
+
+        async function loadReddit() {
+            try {
+                const [posts, insights] = await Promise.all([
+                    fetch('/api/v1/analytics/reddit-posts?limit=50').then(r => r.json()).catch(() => []),
+                    fetch('/api/v1/analytics/reddit-insights').then(r => r.json()).catch(() => ({recommendations: []}))
+                ]);
+                
+                console.log('Insights:', insights);
+                
+                let insightsHTML = '';
+                if (insights.recommendations && insights.recommendations.length > 0) {
+                    insightsHTML = `
+                        <div class="insights-box">
+                            <h3 style="color: #ff6b35; margin-bottom: 20px;">📊 Инвестиционные Инсайты из Reddit</h3>
+                            ${insights.recommendations.map(rec => `
+                                <div class="insight-item">${rec}</div>
+                            `).join('')}
+                            <div style="margin-top: 20px; font-size: 0.9rem; color: #9aa0a6;">
+                                💬 Комментариев: ${insights.total_comments || 0} | 
+                                ⬆️ Upvotes: ${insights.total_score || 0} | 
+                                😊 Sentiment: ${insights.community_sentiment || 'unknown'}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                document.getElementById('reddit-insights').innerHTML = insightsHTML;
+                
+                if (posts.length > 0) {
+                    document.getElementById('reddit-posts').innerHTML = posts.map(p => `
+                        <div class="content-card">
+                            <div style="font-weight: 600; margin-bottom: 10px;">${p.title}</div>
+                            <span class="badge badge-reddit">r/${p.subreddit}</span>
+                            <div style="margin-top: 10px; font-size: 0.85rem; color: #9aa0a6;">
+                                ⬆️ ${p.score} | 💬 ${p.num_comments}
+                            </div>
+                            <a href="${p.url}" target="_blank" style="color: #ff6b35; text-decoration: none; font-size: 0.85rem; margin-top: 8px; display: block;">Открыть →</a>
+                        </div>
+                    `).join('');
+                } else {
+                    document.getElementById('reddit-posts').innerHTML = '<p>Нет данных. Нажмите "Собрать Reddit"</p>';
+                }
+            } catch (e) {
+                console.error('Error:', e);
+            }
+        }
+
+        async function collectReddit() {
+            await fetch('/api/v1/narrative/test-reddit-trends', { method: 'POST' });
+            alert('Reddit сбор запущен! Подождите 30 сек и нажмите "Анализировать"');
+        }
+
+        async function analyzeReddit() {
+            await fetch('/api/v1/narrative/analyze-reddit-trends', { method: 'POST' });
+            alert('Анализ запущен! Обновляем через 15 сек...');
+            setTimeout(() => loadReddit(), 15000);
+        }
+
+        loadReddit();
+    </script>
+</body>
+</html>

@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Steam Investor AI - Аналитика Нарративов</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+        .header h1 {
+            font-size: 32px;
+            color: #1e3a8a;
+            margin-bottom: 10px;
+        }
+        .header p {
+            color: #64748b;
+            font-size: 16px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 36px;
+            font-weight: bold;
+            color: #1e3a8a;
+            margin-bottom: 5px;
+        }
+        .stat-label {
+            font-size: 14px;
+            color: #64748b;
+            text-transform: uppercase;
+        }
+        .filters {
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        .filter-btn {
+            padding: 10px 20px;
+            border: 2px solid #e2e8f0;
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .filter-btn:hover {
+            border-color: #667eea;
+            background: #f8fafc;
+        }
+        .filter-btn.active {
+            border-color: #667eea;
+            background: #667eea;
+            color: white;
+        }
+        .games-grid {
+            display: grid;
+            gap: 20px;
+        }
+        .game-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+        .game-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 20px;
+            gap: 15px;
+        }
+        .game-title-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+        }
+        .game-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+            cursor: pointer;
+            transition: color 0.3s;
+        }
+        .game-title:hover {
+            color: #764ba2;
+            text-decoration: underline;
+        }
+        .platform-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .platform-steam {
+            background: #1b2838;
+            color: white;
+        }
+        .platform-itch {
+            background: #fa5c5c;
+            color: white;
+        }
+        .category-badge {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .badge-undermarketed_gem {
+            background: #10b981;
+            color: white;
+        }
+        .badge-marketing_fixable {
+            background: #f59e0b;
+            color: white;
+        }
+        .badge-product_risk {
+            background: #ef4444;
+            color: white;
+        }
+        .badge-not_investable {
+            background: #64748b;
+            color: white;
+        }
+        .scores {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .score-box {
+            text-align: center;
+            padding: 15px;
+            background: #f8fafc;
+            border-radius: 10px;
+        }
+        .score-value {
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .score-label {
+            font-size: 12px;
+            color: #64748b;
+            text-transform: uppercase;
+        }
+        .analysis-section {
+            background: #f8fafc;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+        }
+        .analysis-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #64748b;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+        .issues-list, .actions-list {
+            list-style: none;
+        }
+        .issues-list li, .actions-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .issues-list li:before {
+            content: "⚠️ ";
+        }
+        .actions-list li:before {
+            content: "✅ ";
+        }
+        .why-matters {
+            background: #fff7ed;
+            padding: 15px;
+            border-left: 4px solid #f59e0b;
+            border-radius: 5px;
+            font-style: italic;
+            color: #92400e;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 Steam Investor AI</h1>
+            <p>Анализ нарративов и исправимости — Поиск недооценённых игр</p>
+        </div>
+
+        <div class="stats" id="stats"></div>
+        
+        <div class="filters">
+            <button class="filter-btn active" onclick="filterGames('all')">Все игры</button>
+            <button class="filter-btn" onclick="filterGames('undermarketed_gem')">💎 Недооценённые шедевры</button>
+            <button class="filter-btn" onclick="filterGames('marketing_fixable')">🔧 Маркетинг исправим</button>
+            <button class="filter-btn" onclick="filterGames('product_risk')">⚠️ Продуктовый риск</button>
+            <button class="filter-btn" onclick="filterGames('not_investable')">❌ Не инвестируемо</button>
+        </div>
+
+        <div class="games-grid" id="games"></div>
+    </div>
+
+    <script>
+        const categoryNames = {
+            'undermarketed_gem': 'Недооценённый шедевр',
+            'marketing_fixable': 'Маркетинг исправим',
+            'product_risk': 'Продуктовый риск',
+            'not_investable': 'Не инвестируемо',
+            'pending_analysis': 'Ожидает анализа'
+        };
+
+        let allGames = [];
+        let currentFilter = 'all';
+
+        async function loadGames() {
+            const response = await fetch('/api/v1/narrative/analyzed-games');
+            const data = await response.json();
+            allGames = data.games || [];
+            
+            updateStats();
+            renderGames();
+        }
+
+        function updateStats() {
+            const stats = {
+                total: allGames.length,
+                undermarketed_gem: 0,
+                marketing_fixable: 0,
+                product_risk: 0,
+                not_investable: 0
+            };
+
+            allGames.forEach(game => {
+                stats[game.investor_category]++;
+            });
+
+            const avgGap = allGames.length > 0 
+                ? (allGames.reduce((sum, g) => sum + g.gap_score, 0) / allGames.length).toFixed(1)
+                : 0;
+
+            document.getElementById('stats').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-value">${stats.total}</div>
+                    <div class="stat-label">Проанализировано</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${stats.undermarketed_gem}</div>
+                    <div class="stat-label">💎 Шедевры</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${stats.marketing_fixable}</div>
+                    <div class="stat-label">🔧 Исправимо</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${avgGap}</div>
+                    <div class="stat-label">Средний GAP</div>
+                </div>
+            `;
+        }
+
+        function filterGames(category) {
+            currentFilter = category;
+            
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            renderGames();
+        }
+
+        function openGame(title, source) {
+            const platform = source === 'steam' ? 'Steam' : 'Itch.io';
+            const query = encodeURIComponent(`${title} ${platform}`);
+            window.open(`https://www.google.com/search?q=${query}`, '_blank');
+        }
+
+        function renderGames() {
+            const filtered = currentFilter === 'all' 
+                ? allGames 
+                : allGames.filter(g => g.investor_category === currentFilter);
+
+            const gamesHtml = filtered.map(game => `
+                <div class="game-card">
+                    <div class="game-header">
+                        <div class="game-title-section">
+                            <div class="game-title" onclick="openGame('${game.title}', '${game.source}')">${game.title || 'Неизвестная игра'}</div>
+                            <span class="platform-badge platform-${game.source}">
+                                ${game.source === 'steam' ? '🎮 Steam' : '🎨 Itch.io'}
+                            </span>
+                        </div>
+                        <div class="category-badge badge-${game.investor_category}">
+                            ${categoryNames[game.investor_category]}
+                        </div>
+                    </div>
+
+                    <div class="scores">
+                        <div class="score-box">
+                            <div class="score-value" style="color: ${game.product_potential >= 7 ? '#10b981' : '#f59e0b'}">${game.product_potential}</div>
+                            <div class="score-label">Потенциал</div>
+                        </div>
+                        <div class="score-box">
+                            <div class="score-value" style="color: ${game.gtm_execution >= 7 ? '#10b981' : '#ef4444'}">${game.gtm_execution}</div>
+                            <div class="score-label">Маркетинг</div>
+                        </div>
+                        <div class="score-box">
+                            <div class="score-value" style="color: ${game.gap_score >= 2 ? '#10b981' : '#64748b'}">${game.gap_score}</div>
+                            <div class="score-label">GAP разрыв</div>
+                        </div>
+                        <div class="score-box">
+                            <div class="score-value" style="color: ${game.fixability_score >= 7 ? '#10b981' : '#f59e0b'}">${game.fixability_score}</div>
+                            <div class="score-label">Исправимость</div>
+                        </div>
+                    </div>
+
+                    ${game.main_issues && game.main_issues.length > 0 ? `
+                        <div class="analysis-section">
+                            <div class="analysis-title">Основные проблемы</div>
+                            <ul class="issues-list">
+                                ${game.main_issues.map(issue => `<li>${translateIssue(issue)}</li>`).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+
+                    ${game.recommended_actions && game.recommended_actions.length > 0 ? `
+                        <div class="analysis-section">
+                            <div class="analysis-title">Рекомендуемые действия</div>
+                            <ul class="actions-list">
+                                ${game.recommended_actions.map(action => `<li>${translateAction(action)}</li>`).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+
+                    ${game.investment_reasoning ? `
+                        <div class="analysis-section" style="background: #f0f9ff; border-left: 4px solid #667eea;">
+                            <div class="analysis-title" style="color: #1e3a8a;">💡 Инвестиционный анализ</div>
+                            <div style="white-space: pre-line; line-height: 1.8; color: #1e293b;">
+                                ${game.investment_reasoning}
+                            </div>
+                        </div>
+                    ` : ''}
+                    
+                    ${game.why_matters ? `
+                        <div class="why-matters">
+                            <strong>Почему это важно:</strong> ${translateWhy(game.why_matters)}
+                        </div>
+                    ` : ''}
+                </div>
+            `).join('');
+
+            document.getElementById('games').innerHTML = gamesHtml || '<p style="text-align: center; color: white;">Нет игр с этим фильтром.</p>';
+        }
+
+        function translateIssue(issue) {
+            const translations = {
+                "No trailer or trailer doesn't express pattern": "Нет трейлера или трейлер не выражает паттерн",
+                "Hook text doesn't clearly communicate transformation": "Хук не передаёт трансформацию игрока",
+                "Demo missing or doesn't showcase core pattern": "Демо отсутствует или не показывает паттерн"
+            };
+            return translations[issue] || issue;
+        }
+
+        function translateAction(action) {
+            const translations = {
+                "Rewrite hook - first sentence must show pattern": "Переписать хук — первое предложение должно показывать паттерн",
+                "Create/recut trailer - first 10 sec shows pattern": "Создать/переделать трейлер — первые 10 сек показывают паттерн",
+                "Add demo that delivers pattern within 5 minutes": "Добавить демо, которое раскрывает паттерн за 5 минут"
+            };
+            return translations[action] || action;
+        }
+
+        function translateWhy(text) {
+            return text.replace('High PP', 'Высокий потенциал')
+                      .replace('but weak GTM', 'но слабый маркетинг')
+                      .replace('Pattern is strong but hidden', 'Паттерн сильный, но скрыт');
+        }
+
+        loadGames();
+    </script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+# Mac
+.DS_Store
+
+# Environment variables (secrets)
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local databases & dumps
+db/
+backups/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/

@@ -1,0 +1,14 @@
+{
+  "dev_name": "Test Developer",
+  "email": "test@example.com",
+  "studio_name": "Test Studio",
+  "team_size": 2,
+  "released_before": false,
+  "timeline_months": 12,
+  "hook_one_liner": "Dark Souls meets Stardew Valley - a roguelike farming game where you grow deadly plants",
+  "pitch_text": "Players explore procedurally generated dungeons, collect seeds, build their garden, and fight using plant-based abilities. Core loop: explore -> collect -> craft -> upgrade -> repeat.",
+  "tags": ["roguelike", "farming", "action"],
+  "build_link": "https://example.com/demo",
+  "video_link": "https://youtube.com/watch?v=demo",
+  "links": {}
+}

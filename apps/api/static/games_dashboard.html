@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game Scout - Аналитика Игр</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        .header h1 { color: #1e3a8a; font-size: 32px; margin-bottom: 10px; }
+        .header p { color: #666; font-size: 16px; }
+        .nav {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .nav a, .action-btn {
+            padding: 10px 20px;
+            background: #e0e7ff;
+            color: #1e3a8a;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.2s;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .nav a:hover, .action-btn:hover {
+            background: #1e3a8a;
+            color: white;
+        }
+        .action-btn.success { background: #10b981; color: white; }
+        .action-btn.success:hover { background: #059669; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        .stat-card h3 {
+            color: #999;
+            font-size: 14px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+        .stat-card .value { color: #333; font-size: 32px; font-weight: bold; }
+        .games-grid { display: grid; gap: 20px; }
+        .game-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .game-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+        }
+        .game-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 20px;
+        }
+        .game-title h2 { color: #333; font-size: 24px; margin-bottom: 5px; }
+        .game-title .source { 
+            color: #666; 
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+        .source-badge {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .source-steam { background: #171a21; color: #66c0f4; }
+        .source-itch { background: #fa5c5c; color: white; }
+        .analysis {
+            background: #f0fdf4;
+            border-left: 4px solid #10b981;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .analysis h4 {
+            color: #065f46;
+            font-size: 14px;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+        .analysis p {
+            color: #047857;
+            line-height: 1.6;
+            font-size: 14px;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .metric-item {
+            text-align: center;
+            padding: 15px;
+            background: #f8fafc;
+            border-radius: 10px;
+        }
+        .metric-item .label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
+        .metric-item .value { font-size: 24px; font-weight: bold; color: #1e3a8a; }
+        .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 15px; }
+        .tag {
+            background: #dbeafe;
+            color: #1e40af;
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 12px;
+        }
+        .loading { text-align: center; padding: 50px; color: white; font-size: 18px; }
+        .error, .success {
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .error { background: #fee2e2; color: #991b1b; }
+        .success { background: #d1fae5; color: #065f46; }
+        .game-url {
+            color: #3b82f6;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .game-url:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎮 Game Scout - Аналитика Игр</h1>
+            <p>Отслеживание трендовых игр из Steam и Itch.io с подробным анализом</p>
+            <div class="nav">
+                <a href="/">📊 Питчи</a>
+                <a href="/games-dashboard">🎮 Игры</a>
+                <button class="action-btn success" onclick="collectSteam()">🔄 Обновить Steam</button>
+                <button class="action-btn success" onclick="collectItch()">🔄 Обновить Itch.io</button>
+                <button class="action-btn" onclick="loadGames()">♻️ Обновить Дашборд</button>
+            </div>
+        </div>
+        <div id="message"></div>
+        <div id="stats" class="stats"></div>
+        <div id="games" class="games-grid"></div>
+    </div>
+    <script>
+        async function loadGames() {
+            const gamesDiv = document.getElementById('games');
+            const statsDiv = document.getElementById('stats');
+            gamesDiv.innerHTML = '<div class="loading">Загрузка игр...</div>';
+            try {
+                const response = await fetch('/games?page_size=50');
+                const data = await response.json();
+                if (data.games.length === 0) {
+                    gamesDiv.innerHTML = '<div class="loading">Пока нет игр!</div>';
+                    return;
+                }
+                const steamCount = data.games.filter(g => g.source === 'steam').length;
+                const itchCount = data.games.filter(g => g.source === 'itch').length;
+                statsDiv.innerHTML = `
+                    <div class="stat-card"><h3>Всего игр</h3><div class="value">${data.total}</div></div>
+                    <div class="stat-card"><h3>Steam</h3><div class="value">${steamCount}</div></div>
+                    <div class="stat-card"><h3>Itch.io</h3><div class="value">${itchCount}</div></div>
+                `;
+                gamesDiv.innerHTML = data.games.map(game => renderGame(game)).join('');
+            } catch (error) {
+                gamesDiv.innerHTML = `<div class="error">Ошибка: ${error.message}</div>`;
+            }
+        }
+        
+        function analyzeGame(game) {
+            // Рассчитываем рейтинг
+            const positive = game.metrics[0].positive_reviews || 0;
+            const negative = game.metrics[0].negative_reviews || 0;
+            const total = positive + negative;
+            const rating = total > 0 ? Math.round((positive / total) * 100) : 0;
+            const metrics = game.metrics && game.metrics.length > 0 ? game.metrics[0] : null;
+            if (!metrics) {
+                return "📊 Данные по метрикам пока не собраны. Нажмите кнопку 'Обновить' выше, чтобы собрать свежие данные.";
+            }
+            
+            const reviews = metrics.reviews_total || 0;
+            const reviews7d = metrics.reviews_7d || 0;
+            const followers = metrics.followers || 0;
+            const wishlists = metrics.wishlists || 0;
+            
+            let analysis = [];
+            
+            // Анализ популярности
+            if (reviews > 10000) {
+                analysis.push("🔥 Очень популярная игра с большим количеством отзывов.");
+            } else if (reviews > 1000) {
+                analysis.push("✅ Стабильная игра с хорошей базой игроков.");
+            } else if (reviews > 100) {
+                analysis.push("🌱 Растущая игра, начинает набирать аудиторию.");
+            } else {
+                analysis.push("🆕 Новая игра или нишевый проект.");
+            }
+            
+            // Анализ рейтинга
+            if (rating >= 90) {
+                analysis.push(`⭐ ШЕДЕВР! ${rating}% позитивных отзывов - игроки обожают эту игру!`);
+            } else if (rating >= 80) {
+                analysis.push(`👍 Отличный рейтинг: ${rating}% позитивных отзывов.`);
+            } else if (rating >= 70) {
+                analysis.push(`✅ Хороший рейтинг: ${rating}% позитивных отзывов.`);
+            } else if (rating >= 50) {
+                analysis.push(`📊 Смешанные отзывы: ${rating}% позитивных.`);
+            } else if (total > 100) {
+                analysis.push(`⚠️ Негативный рейтинг: ${rating}% позитивных отзывов.`);
+            }
+            
+            // Анализ владельцев
+            const ownersMin = metrics.owners_min || 0;
+            const ownersMax = metrics.owners_max || 0;
+            if (ownersMax >= 100000000) {
+                analysis.push(`🌍 МАССОВЫЙ ХИТ! Более ${(ownersMax/1000000).toFixed(0)}М владельцев игры!`);
+            } else if (ownersMax >= 10000000) {
+                analysis.push(`⭐ Очень успешная игра: ${(ownersMin/1000000).toFixed(0)}-${(ownersMax/1000000).toFixed(0)}М владельцев.`);
+            } else if (ownersMax >= 1000000) {
+                analysis.push(`�� Популярная игра: ${(ownersMin/1000000).toFixed(1)}-${(ownersMax/1000000).toFixed(1)}М владельцев.`);
+            }
+            
+            // Анализ времени в игре
+            const playTime = metrics.average_playtime_forever || 0;
+            if (playTime > 10000) {
+                analysis.push(`🎮 Невероятная вовлечённость! Игроки проводят ${(playTime/60).toFixed(0)} часов в игре.`);
+            } else if (playTime > 1000) {
+                analysis.push(`🕹️ Хорошая вовлечённость: ${(playTime/60).toFixed(0)} часов среднего времени игры.`);
+            }
+            
+            // Анализ активности
+            const velocity = metrics.review_velocity_7d || 0;
+            const momentum = metrics.momentum_ratio || 1.0;
+            
+            if (reviews7d > 100) {
+                analysis.push("🚀 Высокая активность! Много новых отзывов за последнюю неделю.");
+                if (velocity > 50) {
+                    analysis.push(`📊 Скорость роста: ${velocity.toFixed(0)} отзывов/день.`);
+                }
+            } else if (reviews7d > 20) {
+                analysis.push("📈 Хорошая динамика роста отзывов.");
+            } else if (reviews7d > 0) {
+                analysis.push("💤 Низкая активность в последнюю неделю.");
+            }
+            
+            // Анализ momentum
+            if (momentum > 1.5) {
+                analysis.push("⚡ ВЗРЫВНОЙ РОСТ! Игра набирает популярность быстрее чем неделю назад.");
+            } else if (momentum > 1.1) {
+                analysis.push("📈 Положительная динамика - рост ускоряется.");
+            } else if (momentum < 0.7) {
+                analysis.push("�� Замедление роста - интерес угасает.");
+            }
+            
+            // Анализ wishlists
+            if (wishlists > 50000) {
+                analysis.push("⭐ Огромный интерес! Более 50k в списках желаемого.");
+            } else if (wishlists > 10000) {
+                analysis.push("💎 Высокий потенциал - много добавлений в wishlist.");
+            } else if (wishlists > 1000) {
+                analysis.push("👀 Умеренный интерес от сообщества.");
+            }
+            
+            // Анализ followers
+            if (followers > 10000) {
+                analysis.push("👥 Большое сообщество подписчиков.");
+            } else if (followers > 1000) {
+                analysis.push("👥 Растущее сообщество.");
+            }
+            
+            // Рекомендации
+            if (reviews7d > 50 && wishlists > 5000) {
+                analysis.push("💰 ИНВЕСТИЦИОННАЯ ВОЗМОЖНОСТЬ: Активный рост + высокий интерес.");
+            }
+            
+            if (analysis.length === 0) {
+                return "📊 Недостаточно данных для анализа.";
+            }
+            
+            return analysis.join(" ");
+        }
+        
+        function renderGame(game) {
+            const latestMetrics = game.metrics && game.metrics.length > 0 ? game.metrics[0] : null;
+            const analysis = analyzeGame(game);
+            
+            return `
+                <div class="game-card">
+                    <div class="game-header">
+                        <div class="game-title">
+                            <h2>${game.title || game.source_id || 'Неизвестная игра'}</h2>
+                            <div class="source">${game.source} • ${game.release_status === 'released' ? 'Выпущена' : game.release_status === 'coming_soon' ? 'Скоро выйдет' : 'Статус неизвестен'}</div>
+                            ${game.url ? `<a href="${game.url}" target="_blank" class="game-url">🔗 Открыть на ${game.source}</a>` : ''}
+                        </div>
+                        <div class="source-badge source-${game.source}">${game.source.toUpperCase()}</div>
+                    </div>
+                    
+                    <div class="analysis">
+                        <h4>📊 Аналитика и рекомендации:</h4>
+                        <p>${analysis}</p>
+                    </div>
+                    
+                    ${game.description ? `<p style="color: #666; margin-bottom: 15px; line-height: 1.6;">${game.description.substring(0, 200)}${game.description.length > 200 ? '...' : ''}</p>` : ''}
+                    
+                    ${latestMetrics ? `
+                        <div class="metrics-grid" style="grid-template-columns: repeat(6, 1fr);">
+                            <div class="metric-item">
+                                <div class="label">Отзывы</div>
+                                <div class="value">${latestMetrics.reviews_total?.toLocaleString() || 0}</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="label">👍 Позитив</div>
+                                <div class="value" style="color: #10b981">${latestMetrics.positive_reviews?.toLocaleString() || 0}</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="label">👎 Негатив</div>
+                                <div class="value" style="color: #ef4444">${latestMetrics.negative_reviews?.toLocaleString() || 0}</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="label">⭐ Рейтинг</div>
+                                <div class="value" style="color: ${(() => {
+                                    const p = latestMetrics.positive_reviews || 0;
+                                    const n = latestMetrics.negative_reviews || 0;
+                                    const total = p + n;
+                                    const r = total > 0 ? Math.round((p/total)*100) : 0;
+                                    return r >= 80 ? '#10b981' : r >= 70 ? '#f59e0b' : '#ef4444';
+                                })()}">${(() => {
+                                    const p = latestMetrics.positive_reviews || 0;
+                                    const n = latestMetrics.negative_reviews || 0;
+                                    const total = p + n;
+                                    return total > 0 ? Math.round((p/total)*100) + '%' : '-';
+                                })()}</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="label">🌍 Владельцы</div>
+                                <div class="value">${latestMetrics.owners_max ? (latestMetrics.owners_max/1000000).toFixed(0) + 'M' : '-'}</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="label">⏱️ Часов</div>
+                                <div class="value">${latestMetrics.average_playtime_forever ? (latestMetrics.average_playtime_forever/60).toFixed(0) : '-'}</div>
+                            </div>
+                        </div>
+                    ` : '<p style="color: #999; margin-bottom: 20px;">Метрики пока не собраны. Нажмите "Обновить Steam" или "Обновить Itch.io" выше.</p>'}
+                    
+                    <div class="tags">
+                        ${game.tags.map(t => `<span class="tag">${t}</span>`).join('')}
+                        ${game.has_demo ? '<span class="tag" style="background: #dcfce7; color: #15803d;">🎮 Есть демо</span>' : ''}
+                        ${game.price_eur ? `<span class="tag" style="background: #fef3c7; color: #92400e;">💰 €${game.price_eur.toFixed(2)}</span>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+        
+        async function collectSteam() {
+            showMessage('🔄 Запускаем сбор данных из Steam...', 'loading');
+            try {
+                const response = await fetch('/tasks/collect/steam', { method: 'POST' });
+                const data = await response.json();
+                showMessage(`✅ ${data.message}. Обновление займет несколько минут.`, 'success');
+                setTimeout(loadGames, 5000);
+            } catch (error) {
+                showMessage(`❌ Ошибка: ${error.message}`, 'error');
+            }
+        }
+        
+        async function collectItch() {
+            showMessage('🔄 Запускаем сбор данных из Itch.io...', 'loading');
+            try {
+                const response = await fetch('/tasks/collect/itch', { method: 'POST' });
+                const data = await response.json();
+                showMessage(`✅ ${data.message}. Обновление займет несколько минут.`, 'success');
+                setTimeout(loadGames, 5000);
+            } catch (error) {
+                showMessage(`❌ Ошибка: ${error.message}`, 'error');
+            }
+        }
+        
+        function showMessage(text, type) {
+            const msgDiv = document.getElementById('message');
+            msgDiv.innerHTML = `<div class="${type}">${text}</div>`;
+            if (type !== 'loading') {
+                setTimeout(() => { msgDiv.innerHTML = ''; }, 5000);
+            }
+        }
+        
+        loadGames();
+        setInterval(loadGames, 30000);
+    </script>
+</body>
+</html>

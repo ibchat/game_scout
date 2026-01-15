@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Trend Radar - Game Scout</title>
+    <style>
+        body { background: #1a1d23; color: #e4e4e7; font-family: system-ui; margin: 0; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { color: #4a9eff; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px; margin: 20px 0; }
+        .card { background: #252932; padding: 20px; border-radius: 8px; border: 1px solid #3a3f4b; }
+        .badge { display: inline-block; padding: 4px 12px; border-radius: 4px; font-size: 0.85rem; margin: 3px; }
+        .badge-mechanic { background: rgba(255, 193, 7, 0.2); color: #ffc107; }
+        .badge-pattern { background: rgba(76, 175, 80, 0.2); color: #4caf50; }
+        .badge-term { background: rgba(74, 158, 255, 0.2); color: #4a9eff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 YouTube Trend Radar</h1>
+        <p>Автоматически сгенерированные поисковые запросы на основе трендов YouTube</p>
+        
+        <h2>Сгенерированные Query для поиска игр:</h2>
+        <div id="queries" class="grid"></div>
+        
+        <h2>Топ механики и паттерны:</h2>
+        <div id="snapshots" class="grid"></div>
+    </div>
+    
+    <script>
+        async function load() {
+            const queries = await fetch('/api/v1/analytics/trend-queries').then(r => r.json());
+            const snapshots = await fetch('/api/v1/analytics/trend-snapshots').then(r => r.json());
+            
+            document.getElementById('queries').innerHTML = queries.map(q => `
+                <div class="card">
+                    <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 10px;">${q.query}</div>
+                    ${q.reason?.mechanic ? `<span class="badge badge-mechanic">${q.reason.mechanic}</span>` : ''}
+                    ${q.reason?.pattern ? `<span class="badge badge-pattern">${q.reason.pattern}</span>` : ''}
+                    ${q.reason?.trending_term ? `<span class="badge badge-term">${q.reason.trending_term}</span>` : ''}
+                </div>
+            `).join('');
+            
+            document.getElementById('snapshots').innerHTML = snapshots.map(s => `
+                <div class="card">
+                    <h3>${s.query_set}</h3>
+                    <p style="opacity: 0.7;">${s.date}</p>
+                    <div><strong>Механики:</strong> ${s.top_mechanics.map(m => `<span class="badge badge-mechanic">${m}</span>`).join('')}</div>
+                    <div><strong>Паттерны:</strong> ${s.top_patterns.map(p => `<span class="badge badge-pattern">${p}</span>`).join('')}</div>
+                </div>
+            `).join('');
+        }
+        load();
+    </script>
+</body>
+</html>

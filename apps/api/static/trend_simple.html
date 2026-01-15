@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Trend Radar</title>
+<style>
+body{background:#1a1d23;color:#e8eaed;font-family:system-ui;padding:20px}
+.card{background:#2d3139;padding:15px;margin:10px;border-radius:8px}
+h1{color:#4a9eff}
+.badge{background:rgba(74,158,255,0.2);color:#4a9eff;padding:4px 12px;border-radius:12px;font-size:0.85rem;margin:3px;display:inline-block}
+</style>
+</head>
+<body>
+<h1>🎯 Trend Radar</h1>
+<div id="content">Загрузка...</div>
+<script>
+fetch('/api/v1/analytics/trend-queries').then(r=>r.json()).then(d=>{
+  document.getElementById('content').innerHTML = d.map(q=>
+    `<div class="card"><strong>${q.query}</strong><br>${q.reason.mechanic||q.reason.trending_term||''}</div>`
+  ).join('');
+});
+</script>
+</body>
+</html>
