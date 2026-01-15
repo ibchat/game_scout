@@ -1,60 +1,63 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List
+
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import select, func, or_
-from typing import Optional
-from datetime import date
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from apps.api.deps import get_db_session
-from apps.api.schemas.games import GameResponse, GameListResponse
-from apps.db.models import Game, GameSource, GameMetricsDaily
 
-router = APIRouter()
+router = APIRouter(prefix="/games", tags=["Games"])
 
 
-@router.get("", response_model=GameListResponse)
-async def list_games(
-    source: Optional[str] = Query(None, description="Filter by source (steam/itch)"),
-    tag: Optional[str] = Query(None, description="Filter by tag"),
-    from_date: Optional[date] = Query(None, description="Filter from created date"),
-    to_date: Optional[date] = Query(None, description="Filter to created date"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db_session)
-):
-    """List games with optional filters"""
-    stmt = select(Game).options(joinedload(Game.metrics))
-    
-    # Apply filters
-    if source:
+@router.get("/health")
+def games_health() -> Dict[str, Any]:
+    return {"status": "ok"}
+
+
+@router.get("/list")
+def games_list(
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db_session),
+) -> List[Dict[str, Any]]:
+    """
+    Пытаемся отдать список игр из локальной таблицы (если она есть).
+    Поддерживаем варианты:
+      - steam_games (steam_app_id, name, review_count)
+      - games (steam_app_id, name, review_count)
+    """
+    queries = [
+        """
+        SELECT steam_app_id, name, review_count
+        FROM steam_games
+        ORDER BY COALESCE(review_count, 0) DESC
+        LIMIT :limit
+        """,
+        """
+        SELECT steam_app_id, name, review_count
+        FROM games
+        ORDER BY COALESCE(review_count, 0) DESC
+        LIMIT :limit
+        """,
+    ]
+
+    rows = None
+    for q in queries:
         try:
-            source_enum = GameSource(source)
-            stmt = stmt.where(Game.source == source_enum)
-        except ValueError:
-            pass
-    
-    if tag:
-        # PostgreSQL JSONB contains
-        stmt = stmt.where(Game.tags.op('@>')(f'["{tag.lower()}"]'))
-    
-    if from_date:
-        stmt = stmt.where(func.date(Game.created_at) >= from_date)
-    
-    if to_date:
-        stmt = stmt.where(func.date(Game.created_at) <= to_date)
-    
-    # Get total count
-    count_stmt = select(func.count()).select_from(stmt.subquery())
-    total = db.execute(count_stmt).scalar()
-    
-    # Apply pagination
-    stmt = stmt.order_by(Game.created_at.desc())
-    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
-    
-    games = db.execute(stmt).unique().scalars().all()
-    
-    return GameListResponse(
-        games=games,
-        total=total,
-        page=page,
-        page_size=page_size
-    )
+            rows = db.execute(text(q), {"limit": int(limit)}).mappings().all()
+            break
+        except Exception:
+            continue
+
+    if not rows:
+        return []
+
+    return [
+        {
+            "steam_app_id": str(r.get("steam_app_id")),
+            "name": r.get("name"),
+            "review_count": int(r.get("review_count") or 0),
+        }
+        for r in rows
+    ]
