@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Game Scout — Dashboard</title>
-  <style>
+    <style>
     :root{
       --bg: #0b0f14;
       --panel: rgba(255,255,255,0.06);
@@ -16,6 +16,7 @@
       --green: #79e29b;
       --orange: #ffb86b;
       --red: #ff6b81;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
     }
     *{ box-sizing:border-box; }
     body{
@@ -117,15 +118,25 @@
       border-radius: 18px;
       border: 1px solid var(--stroke);
       background: rgba(0,0,0,0.18);
+      align-items: center;
+    }
+    .row .group{
+      display:flex; gap:10px; flex-wrap: wrap;
+      flex: 1 1 auto;
+      align-items: center;
     }
     .row input{
-      flex: 1 1 260px;
+      flex: 1 1 220px;
       padding: 12px 14px;
       border-radius: 14px;
       border: 1px solid rgba(255,255,255,0.14);
       background: rgba(0,0,0,0.25);
       color: var(--text);
       outline: none;
+    }
+    .row .mini{
+      flex: 0 0 150px;
+      max-width: 180px;
     }
     .btn{
       padding: 12px 16px;
@@ -136,19 +147,35 @@
       font-weight: 750;
       cursor:pointer;
       user-select:none;
+      white-space: nowrap;
     }
     .btn.primary{
       border-color: rgba(110,168,255,0.35);
       background: rgba(110,168,255,0.20);
     }
+    .btn.danger{
+      border-color: rgba(255,107,129,0.35);
+      background: rgba(255,107,129,0.12);
+    }
     .small{
       color: var(--muted);
       font-size: 13px;
-      margin-top: 8px;
+      margin-top: 10px;
+      line-height: 1.35;
+    }
+    code{
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 2px 6px;
+            border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(0,0,0,0.20);
+      color: rgba(255,255,255,0.85);
     }
 
     .filter{
       display:flex; gap: 10px; margin-top: 12px;
+      flex-wrap: wrap;
     }
     .chip{
       cursor:pointer;
@@ -175,8 +202,19 @@
     }
     .item .left{ min-width: 0; }
     .item .name{ font-size: 22px; font-weight: 850; margin: 0; }
-    .item .meta{ margin-top: 4px; color: var(--muted); font-weight: 650; }
-    .item .reason{ margin-top: 10px; color: rgba(255,255,255,0.82); }
+    .item .name a{ color: inherit; text-decoration: none; transition: opacity 0.2s; }
+    .item .name a:hover{ opacity: 0.8; text-decoration: underline; }
+    .item .meta{ margin-top: 6px; color: var(--muted); font-weight: 650; line-height: 1.35; }
+    .item .reason{ margin-top: 10px; color: rgba(255,255,255,0.82); line-height: 1.45; white-space: pre-wrap; }
+    .badges{ margin-top: 10px; display:flex; flex-wrap: wrap; gap: 8px; }
+    .badge{
+      font-size: 12px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(0,0,0,0.18);
+      color: rgba(255,255,255,0.80);
+      padding: 6px 10px;
+      border-radius: 999px;
+    }
     .score{
       min-width: 82px;
       height: 48px;
@@ -187,6 +225,7 @@
       font-size: 24px;
       font-weight: 900;
       color: var(--red);
+      flex: 0 0 auto;
     }
     .score.good{
       border-color: rgba(121,226,155,0.35);
@@ -199,15 +238,26 @@
       color: var(--orange);
     }
 
+    .split{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    @media (max-width: 980px){ .split{ grid-template-columns: 1fr; } }
+
     .hidden{ display:none; }
-  </style>
+    .relaunch-subpanel{ margin-top: 20px; }
+    .relaunch-subpanel.hidden{ display:none; }
+    </style>
 </head>
+
 <body>
   <div class="wrap">
     <div class="hero">
       <h1 class="title">🫐 Game Scout</h1>
-      <div class="sub">Платформа инвестиционной аналитики — мониторинг трендов в реальном времени</div>
-    </div>
+      <div class="sub">Платформа инвестиционной аналитики — мониторинг трендов и точек входа</div>
+        </div>
 
     <div class="tabs" id="tabs">
       <div class="tab active" data-tab="analytics">📊 Аналитика</div>
@@ -216,42 +266,69 @@
       <div class="tab" data-tab="games">🎮 База игр</div>
       <div class="tab" data-tab="relaunch">🚀 Relaunch Scout</div>
       <div class="tab" data-tab="yearly">📅 Годовой обзор</div>
-    </div>
+        </div>
 
-    <!-- Analytics -->
+        <!-- Analytics -->
     <section class="panel" id="panel-analytics">
       <h2>📊 Аналитика</h2>
       <div class="status" id="analytics-status">Загрузка…</div>
+      <div class="small">
+        API: <code>/api/v1/analytics/health</code>, <code>/api/v1/analytics/summary</code>
+                </div>
     </section>
 
-    <!-- YouTube -->
+        <!-- YouTube -->
     <section class="panel hidden" id="panel-youtube">
       <h2>📺 YouTube</h2>
       <div class="status" id="youtube-status">Загрузка…</div>
+      <div class="small">
+        API: <code>/api/v1/youtube/health</code>, <code>/api/v1/youtube/summary</code>
+                </div>
     </section>
 
-    <!-- Reddit -->
+        <!-- Reddit -->
     <section class="panel hidden" id="panel-reddit">
       <h2>🟠 Reddit</h2>
       <div class="status" id="reddit-status">Загрузка…</div>
+      <div class="small">
+        API: <code>/api/v1/reddit/health</code>, <code>/api/v1/reddit/summary</code>
+            </div>
     </section>
 
-    <!-- Games -->
+        <!-- Games -->
     <section class="panel hidden" id="panel-games">
       <h2>🎮 База игр</h2>
       <div class="status" id="games-status">Загрузка…</div>
       <div class="status" id="games-list" style="margin-top:12px; display:none;"></div>
+      <div class="small">
+        API: <code>/api/v1/games/health</code>, <code>/api/v1/games/list</code>
+        </div>
     </section>
 
     <!-- Relaunch -->
     <section class="panel hidden" id="panel-relaunch">
-      <h2>🚀 Relaunch Scout</h2>
+      <h2>🚀 Relaunch Scout — Rebound Window Edition</h2>
+      <div class="status" style="color: rgba(255,255,255,0.82);">
+        <b>Концепция:</b> находим недореализованные игры в <b>Rebound Window</b> (6-24 месяца после релиза).<br/>
+        <b>НЕ ищем:</b> новые игры, тренды, хайп — это для других вкладок.<br/>
+        <b>Ищем:</b> игры, которые не выстрелили, но имеют потенциал для перезапуска.
+            </div>
 
-      <div class="cards">
+      <!-- Внутренние вкладки Relaunch Scout -->
+      <div class="tabs" style="margin-top: 20px; border-bottom: 1px solid var(--border);">
+        <div class="tab active" data-subtab="scan">🔍 Scan</div>
+        <div class="tab" data-subtab="candidates">📋 Candidates</div>
+        <div class="tab" data-subtab="diagnosis">🔬 Diagnosis</div>
+        <div class="tab" data-subtab="research">📊 Research</div>
+        </div>
+
+      <!-- Вкладка Scan -->
+      <div class="relaunch-subpanel" id="relaunch-subpanel-scan">
+        <div class="cards">
         <div class="kpi">
           <div class="label">Tracked apps</div>
           <div class="val" id="relaunch-tracked">-</div>
-        </div>
+            </div>
         <div class="kpi">
           <div class="label">Candidates (all)</div>
           <div class="val green" id="relaunch-candidates">-</div>
@@ -262,155 +339,441 @@
         </div>
         <div class="kpi">
           <div class="label">Rejected</div>
-          <div class="val" id="relaunch-rejected">-</div>
+          <div class="val red" id="relaunch-rejected">-</div>
+            </div>
         </div>
-      </div>
 
-      <div class="row">
-        <input id="relaunch-app-id" placeholder="Steam App ID (например 1091500)" />
-        <input id="relaunch-app-name" placeholder="Название игры (как хочешь видеть)" />
-        <button class="btn primary" id="btn-track">Добавить</button>
-        <button class="btn" id="btn-refresh">Обновить</button>
-        < <div class="small">
-          API: <code>/api/v1/relaunch/health</code>, <code>/api/v1/relaunch/candidates</code>, <code>/api/v1/relaunch/admin/track</code>, <code>/api/v1/relaunch/admin/bulk_track</code>
+      <div class="split">
+        <!-- Ручное добавление -->
+        <div class="status">
+          <b>1) Ручной Track (точечно)</b>
+          <div class="row" style="margin-top:10px;">
+            <div class="group">
+              <input id="relaunch-app-id" placeholder="Steam App ID (например 1091500)" />
+              <input id="relaunch-app-name" placeholder="Название игры (как хочешь видеть)" />
+              <input id="relaunch-track-priority" class="mini" placeholder="priority (0..100)" value="50" />
+                </div>
+            <button class="btn primary" id="btn-track">Добавить</button>
+            <button class="btn" id="btn-refresh">Обновить</button>
+            </div>
+          <div class="small">
+            Endpoint: <code>POST /api/v1/relaunch/admin/track</code><br/>
+            Совет: priority=50 — нормальный дефолт.
+          </div>
+          <div class="status" id="track-result" style="display:none; margin-top:10px;"></div>
         </div>
-      </div>
 
-      <div class="filter">
-        <div class="chip active" data-filter="all">Все</div>
-        <div class="chip" data-filter="watchlist">Watchlist</div>
-        <div class="chip" data-filter="rejected">Rejected</div>
-      </div>
+        <!-- Bulk добавление -->
+        <div class="status">
+          <b>2) Bulk Track (массово, как продакшн-инструмент)</b>
+          <div class="row" style="margin-top:10px;">
+            <div class="group">
+              <input id="bulk-limit" class="mini" placeholder="limit" value="200" />
+              <input id="bulk-min-reviews" class="mini" placeholder="min_reviews" value="200" />
+              <input id="bulk-priority" class="mini" placeholder="priority (0..100)" value="50" />
+                                    </div>
+            <button class="btn primary" id="btn-bulk">Bulk Track</button>
+            <button class="btn danger" id="btn-bulk-help">Как это работает?</button>
+                                    </div>
+          <div class="small">
+            Endpoint: <code>POST /api/v1/relaunch/admin/bulk_track</code><br/>
+            Bulk режим НЕ ходит в Steam. Он выбирает кандидатов из БД (<code>steam_games</code> или <code>games</code>).
+                                </div>
+          <div class="status" id="bulk-result" style="display:none; margin-top:10px;"></div>
+            </div>
+        </div>
 
-      <div class="list" id="relaunch-cards"></div>
+      <div class="status" style="margin-top:12px;">
+        <b>3) Сканировать рынок (Rebound Window)</b>
+        <div class="row" style="margin-top:10px;">
+          <div class="group">
+            <input id="scan-limit" class="mini" placeholder="limit" value="200" />
+            <input id="scan-min-reviews" class="mini" placeholder="min_reviews" value="50" />
+            <input id="scan-max-reviews" class="mini" placeholder="max_reviews" value="5000" />
+            <input id="scan-priority" class="mini" placeholder="priority (0..100)" value="50" />
+          </div>
+          <button class="btn primary" id="btn-scan-market">Сканировать рынок</button>
+        </div>
+        <div class="small">
+          Endpoint: <code>POST /api/v1/relaunch/admin/market_scan</code><br/>
+          <b>Rebound Window:</b> ищет недореализованные игры 6-24 месяца после релиза (НЕ новые, НЕ тренды).<br/>
+          Критерии: reviews 50-5000, price > 0, не DLC/demo. Парсит Steam напрямую или использует каталог БД.
+        </div>
+        <div class="status" id="scan-market-result" style="display:none; margin-top:10px;"></div>
+    </div>
+
+      </div> <!-- relaunch-subpanel-scan -->
+
+      <!-- Вкладка Candidates -->
+      <div class="relaunch-subpanel hidden" id="relaunch-subpanel-candidates">
+        <div class="cards">
+          <div class="kpi">
+            <div class="label">Tracked apps</div>
+            <div class="val" id="relaunch-tracked">-</div>
+          </div>
+          <div class="kpi">
+            <div class="label">Candidates (all)</div>
+            <div class="val green" id="relaunch-candidates">-</div>
+          </div>
+          <div class="kpi">
+            <div class="label">Watchlist</div>
+            <div class="val orange" id="relaunch-watchlist">-</div>
+          </div>
+          <div class="kpi">
+            <div class="label">Rejected</div>
+            <div class="val red" id="relaunch-rejected">-</div>
+          </div>
+        </div>
+
+        <div class="filter" style="margin-top: 20px;">
+          <div class="chip active" data-filter="all">Все</div>
+          <div class="chip" data-filter="watchlist">Watchlist</div>
+          <div class="chip" data-filter="rejected">Rejected</div>
+        </div>
+
+        <div class="list" id="relaunch-cards"></div>
+      </div> <!-- relaunch-subpanel-candidates -->
+
+      <!-- Вкладка Diagnosis -->
+      <div class="relaunch-subpanel hidden" id="relaunch-subpanel-diagnosis">
+        <div class="status">
+          <b>Диагностика провала (Rule-based, без LLM)</b>
+          <div class="row" style="margin-top:10px;">
+            <input id="diagnose-limit" class="mini" placeholder="limit" value="50" />
+            <button class="btn primary" id="btn-diagnose">Запустить диагностику</button>
+          </div>
+          <div class="small">
+            Endpoint: <code>POST /api/v1/relaunch/admin/diagnose</code><br/>
+            Анализирует активные игры и определяет категории провала + relaunch angles.
+          </div>
+          <div class="status" id="diagnose-result" style="display:none; margin-top:10px;"></div>
+        </div>
+        <div class="status" style="margin-top:20px;">
+          <b>Пересчёт Scores (для кандидатов)</b>
+          <div class="row" style="margin-top:10px;">
+            <input id="compute-scores-limit" class="mini" placeholder="limit" value="200" />
+            <button class="btn primary" id="btn-compute-scores">Пересчитать Scores</button>
+          </div>
+          <div class="small">
+            Endpoint: <code>POST /api/v1/relaunch/admin/compute_scores</code><br/>
+            Вычисляет relaunch_score для активных игр и обновляет classification.
+          </div>
+          <div class="status" id="compute-scores-result" style="display:none; margin-top:10px;"></div>
+        </div>
+      </div> <!-- relaunch-subpanel-diagnosis -->
+
+      <!-- Вкладка Research -->
+      <div class="relaunch-subpanel hidden" id="relaunch-subpanel-research">
+        <div class="status">
+          <b>Research (заглушка)</b>
+          <div class="small" style="margin-top:10px;">
+            Здесь будет диагностика провала через соцсети (YouTube/Reddit/TikTok).<br/>
+            <b>Важно:</b> это НЕ тренды, а анализ "почему игра не взлетела".<br/>
+            Пока не реализовано.
+                        </div>
+        </div>
+      </div> <!-- relaunch-subpanel-research -->
+
+      <div class="status" id="relaunch-hint" style="display:none; margin-top:12px;">
+        Подсказка: если список пуст — сначала сделай <b>Bulk Track</b> (200+ игр), потом запускай worker/beat задачи для скоринга.
+                                        </div>
+
       <div class="status" id="relaunch-error" style="display:none; border-color: rgba(255,107,129,0.35); color: rgba(255,255,255,0.85);">
         Ошибка загрузки
-      </div>
+                                    </div>
+
+      <div class="small">
+        API: <code>/api/v1/relaunch/health</code>, <code>/api/v1/relaunch/candidates</code>,
+        <code>/api/v1/relaunch/admin/track</code>, <code>/api/v1/relaunch/admin/bulk_track</code>,
+        <code>/api/v1/relaunch/admin/market_scan</code>
+                            </div>
     </section>
 
     <!-- Yearly -->
     <section class="panel hidden" id="panel-yearly">
       <h2>📅 Годовой обзор</h2>
       <div class="status" id="yearly-status">Загрузка…</div>
+      <div class="small">
+        API: <code>/api/v1/yearly/health</code>, <code>/api/v1/yearly/summary</code>
+                        </div>
     </section>
-  </div>
 
 <script>
+  // ==========================================
+  // Конфиг
+  // ==========================================
+  // Базовый префикс API.
+  // ВАЖНО: здесь /api/v1, а дальше мы добавляем /analytics, /relaunch, и т.д.
   const API = "/api/v1";
 
   function qs(sel){ return document.querySelector(sel); }
   function qsa(sel){ return Array.from(document.querySelectorAll(sel)); }
 
+  // ==========================================
+  // Навигация по вкладкам
+  // ==========================================
   function switchTab(tab){
+    if(!tab) return;
+    
     qsa(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === tab));
     qsa("section.panel").forEach(p => p.classList.add("hidden"));
-    qs(`#panel-${tab}`).classList.remove("hidden");
+    
+    const panel = qs(`#panel-${tab}`);
+    if(panel) {
+      panel.classList.remove("hidden");
+    }
 
-    // lazy load per tab
-    if(tab === "analytics") loadAnalytics();
-    if(tab === "youtube") loadYouTube();
-    if(tab === "reddit") loadReddit();
-    if(tab === "games") loadGames();
-    if(tab === "relaunch") loadRelaunch();
-    if(tab === "yearly") loadYearly();
+    // Ленивая загрузка: дергаем бэкенд только когда вкладка открыта
+    try {
+      if(tab === "analytics") loadAnalytics();
+      else if(tab === "youtube") loadYouTube();
+      else if(tab === "reddit") loadReddit();
+      else if(tab === "games") loadGames();
+      else if(tab === "relaunch") loadRelaunch();
+      else if(tab === "yearly") loadYearly();
+    } catch(e) {
+      console.error(`Error loading tab ${tab}:`, e);
+    }
   }
-
   qsa(".tab").forEach(t => t.addEventListener("click", () => switchTab(t.dataset.tab)));
 
-  // --------------------------
-  // Generic fetch helper
-  // --------------------------
-  async function jget(url){
-    const res = await fetch(url, {headers: {"accept":"application/json"}});
-    if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    return await res.json();
+  // ==========================================
+  // Универсальные helpers
+  // ==========================================
+  async function jget(url, timeout = 10000){
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    
+    try {
+      const res = await fetch(url, {
+        headers: {"accept":"application/json"},
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if(!res.ok){
+        const t = await res.text();
+        throw new Error(`${res.status} ${res.statusText} — ${t}`);
+      }
+      return await res.json();
+    } catch(e) {
+      clearTimeout(timeoutId);
+      if (e.name === 'AbortError') {
+        throw new Error(`Request timeout after ${timeout}ms`);
+      }
+      throw e;
+    }
   }
 
-  // --------------------------
+  async function jpost(url, payload, timeout = 30000){
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {"content-type":"application/json", "accept":"application/json"},
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      const txt = await res.text();
+      let data = null;
+      try { data = txt ? JSON.parse(txt) : null; } catch(e) { data = {raw: txt}; }
+      if(!res.ok){
+        throw new Error(`${res.status} ${res.statusText} — ${txt}`);
+      }
+      return data;
+    } catch(e) {
+      clearTimeout(timeoutId);
+      if (e.name === 'AbortError') {
+        throw new Error(`Request timeout after ${timeout}ms`);
+      }
+      throw e;
+    }
+  }
+
+  function showBox(id, html, ok=true){
+    const el = qs(id);
+    if(!el) return;
+    el.style.display = "block";
+    el.style.borderColor = ok ? "rgba(121,226,155,0.30)" : "rgba(255,107,129,0.35)";
+    el.style.color = ok ? "rgba(255,255,255,0.86)" : "rgba(255,255,255,0.86)";
+    el.innerHTML = html;
+  }
+
+  function esc(s){
+    return String(s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+  }
+
+  function showToast(message, isError = false) {
+    // Простой toast для уведомлений
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+      position: fixed; top: 20px; right: 20px; z-index: 10000;
+      padding: 12px 16px; border-radius: 8px;
+      background: ${isError ? 'rgba(255,107,129,0.9)' : 'rgba(121,226,155,0.9)'};
+      color: white; font-weight: 600; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      max-width: 400px; word-wrap: break-word;
+    `;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 5000);
+  }
+
+  // ==========================================
   // Analytics
-  // --------------------------
+  // ==========================================
   async function loadAnalytics(){
     const el = qs("#analytics-status");
+    if(!el) return;
+    
     try{
-      const health = await jget(`${API}/analytics/health`);
-      const sum = await jget(`${API}/analytics/summary`);
-      el.textContent = `OK: ${health.status}. Relaunch tracked: ${sum.relaunch_tracked}`;
+      el.textContent = "Загрузка...";
+      const health = await jget(`${API}/analytics/health`).catch(() => null);
+      const sum = await jget(`${API}/analytics/summary`).catch(() => null);
+      
+      if(health && sum) {
+        el.textContent = `OK: ${health.status || 'unknown'}. Summary: ${JSON.stringify(sum)}`;
+      } else if(health) {
+        el.textContent = `OK: ${health.status || 'unknown'}. Summary недоступен.`;
+                } else {
+        el.textContent = `Backend не отвечает. Проверь, что сервер запущен.`;
+        el.style.color = "rgba(255,107,129,0.85)";
+      }
     }catch(e){
-      el.textContent = `Backend not ready: ${e.message}`;
+      el.textContent = `Ошибка: ${esc(e.message)}`;
+      el.style.color = "rgba(255,107,129,0.85)";
     }
   }
 
-  // --------------------------
+  // ==========================================
   // YouTube
-  // --------------------------
+  // ==========================================
   async function loadYouTube(){
     const el = qs("#youtube-status");
+    if(!el) return;
+    
     try{
-      const health = await jget(`${API}/youtube/health`);
-      const sum = await jget(`${API}/youtube/summary`);
-      el.textContent = `OK: ${health.status}. Items: ${sum.items.length}`;
+      el.textContent = "Загрузка...";
+      const health = await jget(`${API}/youtube/health`).catch(() => null);
+      const sum = await jget(`${API}/youtube/summary`).catch(() => null);
+      
+      if(health && sum) {
+        el.textContent = `OK: ${health.status || 'unknown'}. Summary: ${JSON.stringify(sum)}`;
+      } else if(health) {
+        el.textContent = `OK: ${health.status || 'unknown'}. Summary недоступен.`;
+      } else {
+        el.textContent = `Backend не отвечает. Проверь, что сервер запущен.`;
+        el.style.color = "rgba(255,107,129,0.85)";
+      }
     }catch(e){
-      el.textContent = `Backend not ready: ${e.message}`;
+      el.textContent = `Ошибка: ${esc(e.message)}`;
+      el.style.color = "rgba(255,107,129,0.85)";
     }
   }
 
-  // --------------------------
+  // ==========================================
   // Reddit
-  // --------------------------
+  // ==========================================
   async function loadReddit(){
     const el = qs("#reddit-status");
+    if(!el) return;
+    
     try{
-      const health = await jget(`${API}/reddit/health`);
-      const sum = await jget(`${API}/reddit/summary`);
-      el.textContent = `OK: ${health.status}. Items: ${sum.items.length}`;
+      el.textContent = "Загрузка...";
+      const health = await jget(`${API}/reddit/health`).catch(() => null);
+      const sum = await jget(`${API}/reddit/summary`).catch(() => null);
+      
+      if(health && sum) {
+        el.textContent = `OK: ${health.status || 'unknown'}. Summary: ${JSON.stringify(sum)}`;
+      } else if(health) {
+        el.textContent = `OK: ${health.status || 'unknown'}. Summary недоступен.`;
+      } else {
+        el.textContent = `Backend не отвечает. Проверь, что сервер запущен.`;
+        el.style.color = "rgba(255,107,129,0.85)";
+      }
     }catch(e){
-      el.textContent = `Backend not ready: ${e.message}`;
+      el.textContent = `Ошибка: ${esc(e.message)}`;
+      el.style.color = "rgba(255,107,129,0.85)";
     }
   }
 
-  // --------------------------
+  // ==========================================
   // Games
-  // --------------------------
+  // ==========================================
   async function loadGames(){
     const st = qs("#games-status");
     const list = qs("#games-list");
+    
+    if(!st) return;
+    
     try{
-      const health = await jget(`${API}/games/health`);
-      const rows = await jget(`${API}/games/list?limit=50`);
-      st.textContent = `OK: ${health.status}. Rows: ${rows.length}`;
-      if(rows.length){
-        list.style.display = "block";
-        list.innerHTML = rows.map(r => `<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)">
-          <b>${r.name ?? "—"}</b> <span style="color:rgba(255,255,255,0.6)">#${r.steam_app_id}</span>
-          <span style="float:right;color:rgba(255,255,255,0.6)">reviews: ${r.review_count}</span>
-        </div>`).join("");
-      }else{
-        list.style.display = "block";
-        list.textContent = "Пока нет данных игр (таблица steam_games/games не найдена или пуста).";
+      st.textContent = "Загрузка...";
+      const health = await jget(`${API}/games/health`).catch(() => null);
+      const rows = await jget(`${API}/games/list?limit=50`).catch(() => []);
+      
+      if(health && Array.isArray(rows)) {
+        st.textContent = `OK: ${health.status || 'unknown'}. Игр: ${rows.length}`;
+        if(rows.length){
+          if(list) {
+            list.style.display = "block";
+            list.innerHTML = rows.map(r => `
+              <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)">
+                <b>${esc(r.name ?? r.title ?? "—")}</b>
+                <span style="color:rgba(255,255,255,0.6)">#${esc(r.steam_app_id ?? r.source_id ?? "—")}</span>
+                <span style="float:right;color:rgba(255,255,255,0.6)">reviews: ${esc(r.review_count ?? r.reviews ?? r.reviews_total ?? "—")}</span>
+                                </div>
+            `).join("");
+          }
+        }else{
+          if(list) {
+            list.style.display = "block";
+            list.textContent = "Пока нет данных игр (таблица не найдена или пуста).";
+          }
+        }
+      } else {
+        st.textContent = `Backend не отвечает. Проверь, что сервер запущен.`;
+        st.style.color = "rgba(255,107,129,0.85)";
+        if(list) list.style.display = "none";
       }
     }catch(e){
-      st.textContent = `Backend not ready: ${e.message}`;
-      list.style.display = "none";
+      st.textContent = `Ошибка: ${esc(e.message)}`;
+      st.style.color = "rgba(255,107,129,0.85)";
+      if(list) list.style.display = "none";
     }
   }
 
-  // --------------------------
+  // ==========================================
   // Yearly
-  // --------------------------
+  // ==========================================
   async function loadYearly(){
     const el = qs("#yearly-status");
+    if(!el) return;
+    
     try{
-      const health = await jget(`${API}/yearly/health`);
-      const sum = await jget(`${API}/yearly/summary`);
-      el.textContent = `OK: ${health.status}. ${sum.note ?? ""}`;
+      el.textContent = "Загрузка...";
+      const health = await jget(`${API}/yearly/health`).catch(() => null);
+      const sum = await jget(`${API}/yearly/summary`).catch(() => null);
+      
+      if(health && sum) {
+        el.textContent = `OK: ${health.status || 'unknown'}. Summary: ${JSON.stringify(sum)}`;
+      } else if(health) {
+        el.textContent = `OK: ${health.status || 'unknown'}. Summary недоступен.`;
+                } else {
+        el.textContent = `Backend не отвечает. Проверь, что сервер запущен.`;
+        el.style.color = "rgba(255,107,129,0.85)";
+      }
     }catch(e){
-      el.textContent = `Backend not ready: ${e.message}`;
+      el.textContent = `Ошибка: ${esc(e.message)}`;
+      el.style.color = "rgba(255,107,129,0.85)";
     }
   }
 
-  // --------------------------
-  // Relaunch
-  // --------------------------
+  // ==========================================
+  // Relaunch — ядро фишки
+  // ==========================================
   let relaunchAll = [];
   let relaunchFilter = "all";
 
@@ -432,98 +795,434 @@
 
   function renderRelaunch(items){
     const box = qs("#relaunch-cards");
+    const hint = qs("#relaunch-hint");
     if(!box) return;
 
     const show = (relaunchFilter === "all")
       ? items
       : items.filter(x => x.classification === relaunchFilter);
 
-    if(!show.length){
-      box.innerHTML = `<div class="status">Пока нет данных для фильтра: <b>${relaunchFilter}</b></div>`;
-      return;
+    // Подсказка: если вообще пусто — покажем guidance
+    if(hint){
+      hint.style.display = (items.length === 0) ? "block" : "none";
     }
 
+    if(!show.length){
+      box.innerHTML = `
+        <div class="status">
+          Нет данных для фильтра: <b>${esc(relaunchFilter)}</b><br/>
+          Если у тебя пока мало игр — нажми <b>Bulk Track</b> (200+ кандидатов) и обнови.
+        </div>
+      `;
+                return;
+            }
+            
     box.innerHTML = show.map(app => {
       const score = Number(app.relaunch_score || 0);
       const cls = scoreClass(score);
-      const ss = app.latest_snapshot;
-      const snap = ss ? `• snapshot: ${ss.captured_at} • price: ${ss.price_eur ?? "—"}€ • reviews: ${ss.all_reviews_count} (recent ${ss.recent_reviews_count})` : "";
-      const meta = `classification: <b>${app.classification ?? "—"}</b> • computed_at: ${app.computed_at ?? "—"} ${snap}`;
-      return `
+
+      const failure = Array.isArray(app.failure_reasons) ? app.failure_reasons : [];
+      const angles = Array.isArray(app.relaunch_angles) ? app.relaunch_angles : [];
+      const failureCategories = Array.isArray(app.failure_categories) ? app.failure_categories : [];
+      const suggestedAngles = Array.isArray(app.suggested_angles) ? app.suggested_angles : [];
+
+      const meta = [
+        `classification: <b>${esc(app.classification ?? "candidate")}</b>`,
+        `computed_at: ${esc(app.computed_at ?? "—")}`,
+      ].join(" • ");
+
+      const badgeHtml = []
+        .concat(suggestedAngles.map(a => `<span class="badge">🎯 ${esc(a)}</span>`))
+        .concat(failureCategories.map(f => `<span class="badge">⚠️ ${esc(f)}</span>`))
+        .concat(angles.map(a => `<span class="badge">📌 ${esc(a)}</span>`))
+        .concat(failure.map(f => `<span class="badge">❌ ${esc(f)}</span>`))
+        .slice(0, 16)
+        .join("");
+                
+                return `
         <div class="item">
           <div class="left">
-            <div class="name">${app.name} <span style="color:rgba(255,255,255,0.6)">(#${app.steam_app_id})</span></div>
+            <div class="name">
+              <a href="${esc(app.steam_url || `https://store.steampowered.com/app/${app.steam_app_id}`)}" target="_blank" style="color: inherit; text-decoration: none;">
+                ${esc(app.name ?? "—")}
+                <span style="color:rgba(255,255,255,0.6)">(#${esc(app.steam_app_id)})</span>
+              </a>
+            </div>
             <div class="meta">${meta}</div>
-            <div class="reason">${(app.reasoning || "").replaceAll("<","&lt;")}</div>
-          </div>
+            ${badgeHtml ? `<div class="badges">${badgeHtml}</div>` : ``}
+            <div class="reason">${esc(app.reasoning || "—")}</div>
+                                </div>
           <div class="score ${cls}">${score.toFixed(1)}</div>
-        </div>
+                                </div>
       `;
     }).join("");
   }
 
   async function loadRelaunch(){
     const err = qs("#relaunch-error");
-    err.style.display = "none";
+    if(err) err.style.display = "none";
+
     try{
-      const health = await jget(`${API}/relaunch/health`);
-      qs("#relaunch-tracked").textContent = health.tracked_apps ?? 0;
+      // 1) Health
+      const health = await jget(`${API}/relaunch/health`).catch(() => ({tracked_apps: 0}));
+      const trackedEl = qs("#relaunch-tracked");
+      if(trackedEl) trackedEl.textContent = health.tracked_apps ?? 0;
 
-      const items = await jget(`${API}/relaunch/candidates?min_score=0&limit=200`);
-      relaunchAll = items;
+      // 2) Candidates
+      const items = await jget(`${API}/relaunch/candidates?min_score=0&limit=200`).catch(() => []);
+      relaunchAll = Array.isArray(items) ? items : [];
 
-      const c = classifyCounts(items);
-      qs("#relaunch-candidates").textContent = items.length;
-      qs("#relaunch-watchlist").textContent = c.watchlist;
-      qs("#relaunch-rejected").textContent = c.rejected;
+      const c = classifyCounts(relaunchAll);
+      const candidatesEl = qs("#relaunch-candidates");
+      const watchlistEl = qs("#relaunch-watchlist");
+      const rejectedEl = qs("#relaunch-rejected");
+      
+      if(candidatesEl) candidatesEl.textContent = relaunchAll.length;
+      if(watchlistEl) watchlistEl.textContent = c.watchlist;
+      if(rejectedEl) rejectedEl.textContent = c.rejected;
 
-      renderRelaunch(items);
+      renderRelaunch(relaunchAll);
     }catch(e){
-      err.style.display = "block";
-      err.textContent = `Ошибка загрузки relaunch: ${e.message}`;
+      console.error("loadRelaunch error:", e);
+      if(err){
+        err.style.display = "block";
+        err.textContent = `Ошибка загрузки relaunch: ${esc(e.message)}`;
+      }
     }
   }
 
-  // Track new app
-  qs("#btn-track").addEventListener("click", async () => {
-    const sid = qs("#relaunch-app-id").value.trim();
-    const name = qs("#relaunch-app-name").value.trim();
+  // ==========================================
+  // Actions: Track
+  // ==========================================
+  const btnTrack = qs("#btn-track");
+  if(btnTrack) {
+    btnTrack.addEventListener("click", async () => {
+      const sidEl = qs("#relaunch-app-id");
+      const nameEl = qs("#relaunch-app-name");
+      const prEl = qs("#relaunch-track-priority");
+      
+      if(!sidEl || !nameEl) return;
+      
+      const sid = sidEl.value.trim();
+      const name = nameEl.value.trim();
+      const pr = prEl?.value?.trim() || "50";
 
-    if(!sid || !name){
-      alert("Нужно заполнить Steam App ID и Название игры");
-      return;
-    }
+      if(!sid || !name){
+        showToast("Нужно заполнить Steam App ID и Название игры", true);
+                return;
+            }
+            
+      const priority = Number(pr || 50);
+      const payload = {steam_app_id: Number(sid), name: name, tracking_priority: priority};
 
-    try{
-      const res = await fetch(`${API}/relaunch/admin/track`, {
-        method: "POST",
-        headers: {"content-type":"application/json"},
-        body: JSON.stringify({steam_app_id: Number(sid), name: name, tracking_priority: 50})
-      });
-      const data = await res.json();
-      if(!res.ok) throw new Error(JSON.stringify(data));
-      qs("#relaunch-app-id").value = "";
-      qs("#relaunch-app-name").value = "";
-      await loadRelaunch();
-    }catch(e){
-      alert("Ошибка track: " + e.message);
+      btnTrack.disabled = true;
+      const originalText = btnTrack.textContent;
+      btnTrack.textContent = "Добавление...";
+
+      try{
+        const data = await jpost(`${API}/relaunch/admin/track`, payload);
+        showBox("#track-result",
+          `<b>Track OK</b><br/><code>${esc(JSON.stringify(data))}</code>`,
+          true
+        );
+        showToast("Игра добавлена в трекинг");
+        if(sidEl) sidEl.value = "";
+        if(nameEl) nameEl.value = "";
+        await loadRelaunch();
+      }catch(e){
+        showBox("#track-result", `<b>Track ERROR</b><br/>${esc(e.message)}`, false);
+        showToast(`Ошибка: ${e.message}`, true);
+      } finally {
+        btnTrack.disabled = false;
+        btnTrack.textContent = originalText;
+      }
+    });
+  }
+
+  const btnRefresh = qs("#btn-refresh");
+  if(btnRefresh) {
+    btnRefresh.addEventListener("click", loadRelaunch);
+  }
+
+  // ==========================================
+  // Actions: Bulk Track
+  // ==========================================
+  const btnBulk = qs("#btn-bulk");
+  if(btnBulk) {
+    btnBulk.addEventListener("click", async () => {
+      const limitEl = qs("#bulk-limit");
+      const minReviewsEl = qs("#bulk-min-reviews");
+      const priorityEl = qs("#bulk-priority");
+      
+      const limit = Number(limitEl?.value?.trim() || 200);
+      const min_reviews = Number(minReviewsEl?.value?.trim() || 200);
+      const tracking_priority = Number(priorityEl?.value?.trim() || 50);
+
+      // Комментарий: bulk_track работает только по БД (steam_games/games),
+      // поэтому если у тебя пока эти таблицы пустые — он вернёт note.
+      const payload = {limit, min_reviews, tracking_priority};
+
+      btnBulk.disabled = true;
+      const originalText = btnBulk.textContent;
+      btnBulk.textContent = "Обработка...";
+
+      try{
+        const data = await jpost(`${API}/relaunch/admin/bulk_track`, payload);
+        showBox("#bulk-result",
+          `<b>Bulk OK</b><br/><code>${esc(JSON.stringify(data))}</code>`,
+          true
+        );
+        showToast(`Добавлено игр: ${data.added || 0}`);
+        await loadRelaunch();
+      }catch(e){
+        showBox("#bulk-result", `<b>Bulk ERROR</b><br/>${esc(e.message)}`, false);
+        showToast(`Ошибка: ${e.message}`, true);
+      } finally {
+        btnBulk.disabled = false;
+        btnBulk.textContent = originalText;
+      }
+    });
+  }
+
+  const btnBulkHelp = qs("#btn-bulk-help");
+  if(btnBulkHelp) {
+    btnBulkHelp.addEventListener("click", () => {
+      alert(
+        "Bulk Track — это продакшн-способ наполнить Relaunch Scout.\n\n" +
+        "Как работает:\n" +
+        "1) НЕ ходит в Steam, не требует ключей.\n" +
+        "2) Ищет таблицы steam_games или games в вашей БД.\n" +
+        "3) Берёт топ по отзывам (reviews >= min_reviews) и добавляет в relaunch_apps.\n\n" +
+        "Если вернул 'note': значит таблиц нет или данных мало — нужно сначала наполнить базу игр."
+      );
+    });
+  }
+
+  // ==========================================
+  // Actions: Сканировать рынок
+  // ==========================================
+  const btnScanMarket = qs("#btn-scan-market");
+  if(btnScanMarket) {
+    btnScanMarket.addEventListener("click", async () => {
+      const limitEl = qs("#scan-limit");
+      const minReviewsEl = qs("#scan-min-reviews");
+      const maxReviewsEl = qs("#scan-max-reviews");
+      const priorityEl = qs("#scan-priority");
+      
+      const limit = Number(limitEl?.value?.trim() || 200);
+      const min_reviews = Number(minReviewsEl?.value?.trim() || 50);
+      const max_reviews = Number(maxReviewsEl?.value?.trim() || 5000);
+      const tracking_priority = Number(priorityEl?.value?.trim() || 50);
+
+      const payload = {
+        min_months: 6,
+        max_months: 36,  // MVP: расширенное окно для гарантии результатов
+        min_reviews: min_reviews,
+        max_reviews: Math.max(max_reviews, 15000),  // MVP: минимум 15000 для большего покрытия
+        mega_hit_reviews: 50000,
+        exclude_f2p: true,
+        limit_seed: limit,
+        limit_add: Math.min(limit, 50),
+        tracking_priority: tracking_priority,
+        page_start: 1,
+        page_end: 15,
+        strict_window: false  // MVP: мягкий режим для гарантии результатов
+      };
+
+      const originalText = btnScanMarket.textContent;
+      btnScanMarket.disabled = true;
+      btnScanMarket.textContent = "Сканирование...";
+
+      try {
+        // Используем mode=quick для быстрого скана (до 25 сек)
+        const data = await jpost(`${API}/relaunch/admin/market_scan?mode=quick`, payload, 30000); // 30s timeout для quick режима
+        console.log("Scan market response:", data);
+        
+        let message = `<b>Сканирование рынка завершено</b><br/>`;
+        if (data.status === "ok" || data.status === "warning") {
+          message += `Seed найдено: ${data.seed_unique || data.seed_total || 0}<br/>`;
+          message += `Детали получены: ${data.details_fetched || 0}<br/>`;
+          message += `Eligible: ${data.eligible || 0}<br/>`;
+          message += `Добавлено: ${data.upserted || 0} игр<br/>`;
+          if (data.excluded) {
+            const excludedList = Object.entries(data.excluded)
+              .filter(([k, v]) => v > 0)
+              .map(([k, v]) => `${k}: ${v}`)
+              .join(", ");
+            if (excludedList) {
+              message += `<small>Исключено: ${esc(excludedList)}</small><br/>`;
+            }
+          }
+          if (data.top_excluded_reasons && data.top_excluded_reasons.length > 0) {
+            const reasons = data.top_excluded_reasons.map(r => `${r.reason}: ${r.count}`).join(", ");
+            message += `<small>Топ причины: ${esc(reasons)}</small><br/>`;
+          }
+          if (data.note) {
+            message += `<small>${esc(data.note)}</small>`;
+          }
+          showBox("#scan-market-result", message, data.status === "ok");
+          if (data.upserted > 0) {
+            showToast(`Сканирование завершено: добавлено ${data.upserted} игр`);
+          } else {
+            showToast(`Сканирование завершено, но не найдено подходящих игр`, true);
+          }
+          await loadRelaunch();
+        } else {
+          message += `<small>${esc(data.note || data.detail || JSON.stringify(data))}</small>`;
+          showBox("#scan-market-result", message, false);
+          showToast(`Ошибка сканирования: ${data.note || data.detail || 'неизвестная ошибка'}`, true);
+        }
+      } catch(e) {
+        console.error("Scan market error:", e);
+        showBox("#scan-market-result", `<b>Ошибка</b><br/>${esc(e.message)}`, false);
+        showToast(`Ошибка: ${e.message}`, true);
+      } finally {
+        btnScanMarket.disabled = false;
+        btnScanMarket.textContent = originalText;
+      }
+    });
+  }
+
+  // ==========================================
+  // Внутренние вкладки Relaunch Scout
+  // ==========================================
+  function switchRelaunchSubTab(subtab) {
+    if(!subtab) return;
+    
+    // Переключаем табы (только внутри Relaunch)
+    qsa("#panel-relaunch .tab[data-subtab]").forEach(t => {
+      t.classList.toggle("active", t.dataset.subtab === subtab);
+    });
+    
+    // Переключаем панели
+    qsa("#panel-relaunch .relaunch-subpanel").forEach(p => {
+      p.classList.add("hidden");
+    });
+    
+    const panel = qs(`#relaunch-subpanel-${subtab}`);
+    if(panel) {
+      panel.classList.remove("hidden");
     }
+    
+    // Ленивая загрузка
+    if(subtab === "candidates") {
+      loadRelaunch();
+    }
+  }
+  
+  // Инициализация внутренних вкладок Relaunch
+  qsa("#panel-relaunch .tab[data-subtab]").forEach(t => {
+    t.addEventListener("click", () => switchRelaunchSubTab(t.dataset.subtab));
   });
 
-  qs("#btn-refresh").addEventListener("click", loadRelaunch);
-
-  // Filter chips
-  qsa(".chip").forEach(ch => {
+  // ==========================================
+  // Filters (только для вкладки Candidates)
+  // ==========================================
+  qsa("#panel-relaunch .chip").forEach(ch => {
     ch.addEventListener("click", () => {
-      qsa(".chip").forEach(x => x.classList.remove("active"));
+      qsa("#panel-relaunch .chip").forEach(x => x.classList.remove("active"));
       ch.classList.add("active");
-      relaunchFilter = ch.dataset.filter;
+      relaunchFilter = ch.dataset.filter || "all";
       renderRelaunch(relaunchAll);
     });
   });
 
-  // initial load
+  // ==========================================
+  // Diagnosis Action
+  // ==========================================
+  const btnDiagnose = qs("#btn-diagnose");
+  if(btnDiagnose) {
+    btnDiagnose.addEventListener("click", async () => {
+      const limitEl = qs("#diagnose-limit");
+      const limit = Number(limitEl?.value?.trim() || 50);
+      
+      const originalText = btnDiagnose.textContent;
+      btnDiagnose.disabled = true;
+      btnDiagnose.textContent = "Диагностика...";
+      
+      try {
+        const data = await jpost(`${API}/relaunch/admin/diagnose`, {limit: limit}, 120000); // 120s timeout
+        console.log("Diagnose response:", data);
+        
+        let message = `<b>Диагностика завершена</b><br/>`;
+        if (data.status === "ok") {
+          message += `Обработано игр: ${data.diagnosed || 0}<br/>`;
+          if (data.errors && data.errors.length > 0) {
+            message += `<small>Ошибки: ${data.errors.length}</small><br/>`;
+          }
+          if (data.note) {
+            message += `<small>${esc(data.note)}</small>`;
+          }
+          showBox("#diagnose-result", message, true);
+          showToast(`Диагностика завершена: обработано ${data.diagnosed} игр`, false);
+          await loadRelaunch(); // Обновляем список кандидатов
+                } else {
+          message += `<small>${esc(data.note || data.detail || JSON.stringify(data))}</small>`;
+          showBox("#diagnose-result", message, false);
+          showToast(`Ошибка диагностики: ${data.note || data.detail || 'неизвестная ошибка'}`, true);
+        }
+      } catch(e) {
+        console.error("Diagnose error:", e);
+        showBox("#diagnose-result", `<b>Ошибка</b><br/>${esc(e.message)}`, false);
+        showToast(`Ошибка: ${e.message}`, true);
+      } finally {
+        btnDiagnose.disabled = false;
+        btnDiagnose.textContent = originalText;
+      }
+    });
+  }
+
+  // ==========================================
+  // Compute Scores Action
+  // ==========================================
+  const btnComputeScores = qs("#btn-compute-scores");
+  if(btnComputeScores) {
+    btnComputeScores.addEventListener("click", async () => {
+      const limitEl = qs("#compute-scores-limit");
+      const limit = Number(limitEl?.value?.trim() || 200);
+      
+      const originalText = btnComputeScores.textContent;
+      btnComputeScores.disabled = true;
+      btnComputeScores.textContent = "Вычисление...";
+      
+      try {
+        const data = await jpost(`${API}/relaunch/admin/compute_scores`, {limit: limit}, 60000); // 60s timeout
+        console.log("Compute scores response:", data);
+        
+        let message = `<b>Пересчёт Scores завершён</b><br/>`;
+        if (data.status === "ok") {
+          message += `Обработано игр: ${data.processed || 0} из ${data.total || 0}<br/>`;
+          if (data.errors && data.errors.length > 0) {
+            message += `<small>Ошибки: ${data.errors.length}</small><br/>`;
+          }
+          if (data.note) {
+            message += `<small>${esc(data.note)}</small>`;
+          }
+          showBox("#compute-scores-result", message, true);
+          showToast(`Scores пересчитаны: ${data.processed} игр`, false);
+          await loadRelaunch(); // Обновляем список кандидатов
+        } else {
+          message += `<small>${esc(data.note || data.detail || JSON.stringify(data))}</small>`;
+          showBox("#compute-scores-result", message, false);
+          showToast(`Ошибка пересчёта: ${data.note || data.detail || 'неизвестная ошибка'}`, true);
+        }
+      } catch(e) {
+        console.error("Compute scores error:", e);
+        showBox("#compute-scores-result", `<b>Ошибка</b><br/>${esc(e.message)}`, false);
+        showToast(`Ошибка: ${e.message}`, true);
+      } finally {
+        btnComputeScores.disabled = false;
+        btnComputeScores.textContent = originalText;
+      }
+    });
+  }
+
+  // ==========================================
+  // Стартовая загрузка
+  // ==========================================
+  // По умолчанию грузим аналитику (дешевле) — relaunch подтянется при клике на вкладку.
   loadAnalytics();
-</script>
+    </script>
+  </div> <!-- wrap -->
 </body>
 </html>
