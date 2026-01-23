@@ -441,85 +441,105 @@ async def aggregate_trends_daily(
 
 @router.get("/games/emerging")
 async def get_emerging_games(
-    limit: int = Query(20, ge=1, le=100),
-    min_velocity: float = Query(10.0, description="Minimum reviews_velocity_7d"),
-    window_days: int = Query(7, ge=1, le=30),
+    limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
     """
     Get emerging games based on multiple signals.
-    Returns games with growing interest (not just popularity).
+    Returns games even with limited history, computing trend_score from available signals.
     """
-    # Calculate velocity from trends_game_daily
-    window_start = date.today() - timedelta(days=window_days)
+    today = date.today()
     
-    # Check if we have enough history
-    history_check = db.execute(
-        text("SELECT COUNT(DISTINCT day) FROM trends_game_daily WHERE day >= :window_start"),
-        {"window_start": window_start}
-    ).scalar()
-    
-    if history_check < 2:
-        return {
-            "status": "insufficient_history",
-            "reason": "insufficient_history",
-            "history_days": history_check,
-            "games": []
-        }
-    
+    # Get latest daily aggregates for all active seed apps
     query = text("""
-        WITH game_velocity AS (
-            SELECT 
-                tgd.steam_app_id,
-                SUM(COALESCE(tgd.reviews_delta_7d, 0)) as reviews_velocity_7d,
-                SUM(COALESCE(tgd.discussions_delta_7d, 0)) as discussion_velocity_7d,
-                AVG(tgd.positive_ratio) as avg_positive_ratio
-            FROM trends_game_daily tgd
-            WHERE tgd.day >= :window_start
-            GROUP BY tgd.steam_app_id
-            HAVING SUM(COALESCE(tgd.reviews_delta_7d, 0)) >= :min_velocity
-        )
         SELECT 
-            gv.steam_app_id,
+            tgd.steam_app_id,
+            tgd.day,
+            tgd.reviews_delta_7d,
+            tgd.discussions_delta_7d,
+            tgd.positive_ratio,
+            tgd.tags,
             f.name,
-            gv.reviews_velocity_7d,
-            gv.discussion_velocity_7d,
-            gv.avg_positive_ratio,
             f.release_date
-        FROM game_velocity gv
-        LEFT JOIN steam_app_facts f ON f.steam_app_id = gv.steam_app_id
-        ORDER BY gv.reviews_velocity_7d DESC
-        LIMIT :limit
+        FROM trends_game_daily tgd
+        JOIN trends_seed_apps seed ON seed.steam_app_id = tgd.steam_app_id
+        LEFT JOIN steam_app_facts f ON f.steam_app_id = tgd.steam_app_id
+        WHERE seed.is_active = true
+          AND tgd.day = (
+              SELECT MAX(day) FROM trends_game_daily WHERE steam_app_id = tgd.steam_app_id
+          )
+        ORDER BY tgd.steam_app_id
     """)
     
-    rows = db.execute(
-        query,
-        {"window_start": window_start, "min_velocity": min_velocity, "limit": limit}
-    ).mappings().all()
+    rows = db.execute(query).mappings().all()
     
-    result = []
+    # Compute trend_score for each game
+    games_with_scores = []
+    trending_tags = ["Roguelike", "Survival", "Co-op", "Automation", "Souls-like", "Deckbuilding"]
+    
     for row in rows:
+        # Compute trend_score
+        trend_score = 0
+        
+        # Positive ratio bonus (0-30)
+        if row["positive_ratio"] and row["positive_ratio"] >= 0.85:
+            trend_score += 30
+        
+        # Reviews delta bonus (0-40, clamped)
+        reviews_delta_7d = row["reviews_delta_7d"] or 0
+        trend_score += min(40, reviews_delta_7d)
+        
+        # Discussions delta bonus (0-10, clamped)
+        discussions_delta_7d = row["discussions_delta_7d"] or 0
+        trend_score += min(10, discussions_delta_7d)
+        
+        # Tags bonus (0-20)
+        tags = row["tags"]
+        tags_list = []
+        if tags:
+            if isinstance(tags, str):
+                try:
+                    tags_list = json.loads(tags)
+                except:
+                    tags_list = []
+            elif isinstance(tags, list):
+                tags_list = tags
+        
+        has_trending_tag = any(tag in trending_tags for tag in tags_list if isinstance(tag, str))
+        if has_trending_tag:
+            trend_score += 20
+        
+        # Build why_flagged
         why_flagged = []
+        if reviews_delta_7d > 100:
+            why_flagged.append(f"High review velocity: +{reviews_delta_7d} reviews in 7d")
+        if discussions_delta_7d > 10:
+            why_flagged.append(f"Active discussions: +{discussions_delta_7d} threads in 7d")
+        if row["positive_ratio"] and row["positive_ratio"] >= 0.85:
+            why_flagged.append(f"High positive ratio: {int(row['positive_ratio'] * 100)}%")
+        if has_trending_tag:
+            why_flagged.append("Trending tag match")
+        if not why_flagged:
+            why_flagged.append("limited_history")
         
-        if row["reviews_velocity_7d"] and row["reviews_velocity_7d"] > 100:
-            why_flagged.append(f"High review velocity: {int(row['reviews_velocity_7d'])} reviews in 7d")
-        
-        if row["discussion_velocity_7d"] and row["discussion_velocity_7d"] > 10:
-            why_flagged.append(f"Active discussions: {int(row['discussion_velocity_7d'])} in 7d")
-        
-        signals = {
-            "reviews_velocity_7d": row["reviews_velocity_7d"],
-            "discussion_velocity_7d": row["discussion_velocity_7d"],
-            "avg_positive_ratio": float(row["avg_positive_ratio"]) if row["avg_positive_ratio"] else None,
-        }
-        
-        result.append({
+        games_with_scores.append({
             "steam_app_id": row["steam_app_id"],
+            "day": row["day"].isoformat() if row["day"] else None,
+            "trend_score": trend_score,
+            "positive_ratio": float(row["positive_ratio"]) if row["positive_ratio"] else None,
+            "reviews_delta_7d": reviews_delta_7d,
+            "discussions_delta_7d": discussions_delta_7d,
+            "why_flagged": ", ".join(why_flagged) if why_flagged else "limited_history",
+            "tags_sample": tags_list[:5] if tags_list else [],
             "name": row["name"],
-            "signals": signals,
-            "why_flagged": why_flagged,
             "release_date": row["release_date"].isoformat() if row["release_date"] else None,
         })
+    
+    # Sort by trend_score descending
+    games_with_scores.sort(key=lambda x: x["trend_score"], reverse=True)
+    
+    # Return top N
+    result = games_with_scores[:limit]
     
     return {
         "status": "ok",
@@ -556,7 +576,7 @@ async def get_trends_debug(
     # Raw signals (last 24h)
     raw_signals = db.execute(
         text("""
-            SELECT source, signal_type, value_num, value_json, captured_at
+            SELECT source, signal_type, value_numeric, value_text, captured_at
             FROM trends_raw_signals
             WHERE steam_app_id = :app_id
               AND captured_at > now() - interval '24 hours'
@@ -597,8 +617,8 @@ async def get_trends_debug(
             {
                 "source": r["source"],
                 "signal_type": r["signal_type"],
-                "value_num": float(r["value_num"]) if r["value_num"] else None,
-                "value_json": r["value_json"],
+                "value_numeric": float(r["value_numeric"]) if r["value_numeric"] else None,
+                "value_text": r["value_text"],
                 "captured_at": r["captured_at"].isoformat() if r["captured_at"] else None,
             }
             for r in raw_signals

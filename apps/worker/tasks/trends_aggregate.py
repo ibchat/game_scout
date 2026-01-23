@@ -65,60 +65,64 @@ def aggregate_daily_trends(db, target_date: Optional[date] = None, days_back: in
             for seed in seed_apps:
                 app_id = seed["steam_app_id"]
                 
-                # Get reviews data from steam_review_daily (if available)
-                review_data = db.execute(
-                    text("""
-                        SELECT all_reviews_count, all_positive_percent, recent_reviews_count_30d
-                        FROM steam_review_daily
-                        WHERE steam_app_id = :app_id AND day = :process_date
-                        ORDER BY computed_at DESC
-                        LIMIT 1
-                    """),
-                    {"app_id": app_id, "process_date": process_date}
-                ).mappings().first()
-                
-                # Calculate deltas
-                reviews_total = review_data["all_reviews_count"] if review_data else None
-                positive_ratio = review_data["all_positive_percent"] / 100.0 if review_data and review_data["all_positive_percent"] else None
-                
-                # Get previous day for delta calculation
-                prev_date = process_date - timedelta(days=1)
-                prev_review_data = db.execute(
-                    text("""
-                        SELECT all_reviews_count
-                        FROM steam_review_daily
-                        WHERE steam_app_id = :app_id AND day = :prev_date
-                        ORDER BY computed_at DESC
-                        LIMIT 1
-                    """),
-                    {"app_id": app_id, "prev_date": prev_date}
-                ).scalar()
-                
-                reviews_delta_1d = None
-                if reviews_total is not None and prev_review_data is not None:
-                    reviews_delta_1d = reviews_total - prev_review_data
-                
-                # Get 7-day delta
-                seven_days_ago = process_date - timedelta(days=7)
-                prev_7d_data = db.execute(
-                    text("""
-                        SELECT all_reviews_count
-                        FROM steam_review_daily
-                        WHERE steam_app_id = :app_id AND day = :seven_days_ago
-                        ORDER BY computed_at DESC
-                        LIMIT 1
-                    """),
-                    {"app_id": app_id, "seven_days_ago": seven_days_ago}
-                ).scalar()
-                
-                reviews_delta_7d = None
-                if reviews_total is not None and prev_7d_data is not None:
-                    reviews_delta_7d = reviews_total - prev_7d_data
-                
-                # Get discussion deltas from raw signals (numeric signal)
-                discussions_delta_1d = _latest_numeric(
-                    db, app_id, 'steam_discussions', 'discussion_velocity', process_date
+                # Get reviews_total from numeric signals (latest on process_date or nearest within 1 day)
+                reviews_total = _latest_numeric(
+                    db, app_id, 'steam_reviews', 'reviews_total', process_date
                 )
+                if reviews_total is None:
+                    # Try previous day if not found
+                    prev_date = process_date - timedelta(days=1)
+                    reviews_total = _latest_numeric(
+                        db, app_id, 'steam_reviews', 'reviews_total', prev_date
+                    )
+                
+                # Get positive_ratio from numeric signals
+                positive_ratio = _latest_numeric(
+                    db, app_id, 'steam_reviews', 'positive_ratio', process_date
+                )
+                if positive_ratio is None:
+                    # Try previous day if not found
+                    prev_date = process_date - timedelta(days=1)
+                    positive_ratio = _latest_numeric(
+                        db, app_id, 'steam_reviews', 'positive_ratio', prev_date
+                    )
+                
+                # Calculate reviews_delta_1d
+                prev_date = process_date - timedelta(days=1)
+                prev_reviews_total = _latest_numeric(
+                    db, app_id, 'steam_reviews', 'reviews_total', prev_date
+                )
+                reviews_delta_1d = None
+                if reviews_total is not None and prev_reviews_total is not None:
+                    reviews_delta_1d = int(reviews_total - prev_reviews_total)
+                
+                # Calculate reviews_delta_7d (7-day delta)
+                seven_days_ago = process_date - timedelta(days=7)
+                baseline_reviews_total = _latest_numeric(
+                    db, app_id, 'steam_reviews', 'reviews_total', seven_days_ago
+                )
+                # If baseline not found, try nearest within 1 day
+                if baseline_reviews_total is None:
+                    six_days_ago = process_date - timedelta(days=6)
+                    baseline_reviews_total = _latest_numeric(
+                        db, app_id, 'steam_reviews', 'reviews_total', six_days_ago
+                    )
+                
+                reviews_delta_7d = 0  # Default to 0 if missing
+                if reviews_total is not None and baseline_reviews_total is not None:
+                    reviews_delta_7d = int(reviews_total - baseline_reviews_total)
+                elif reviews_total is not None:
+                    # If we have current but no baseline, delta is unknown, use 0
+                    reviews_delta_7d = 0
+                
+                # Get discussion deltas from raw signals
+                discussions_delta_1d = _latest_numeric(
+                    db, app_id, 'steam_discussions', 'discussion_threads_7d', process_date
+                )
+                discussions_delta_1d = int(discussions_delta_1d) if discussions_delta_1d is not None else 0
+                
+                # Calculate discussions_delta_7d (currently 0 as placeholder)
+                discussions_delta_7d = 0  # Placeholder until implemented
                 
                 # Get tags from raw signals (text signal, may contain JSON array string)
                 tags_signal = db.execute(
@@ -145,29 +149,30 @@ def aggregate_daily_trends(db, target_date: Optional[date] = None, days_back: in
                     else:
                         tags = tags_signal
                 
-                # Compute why_flagged (preliminary)
+                # Compute why_flagged
                 why_flagged = []
                 if reviews_delta_7d and reviews_delta_7d > 100:
                     why_flagged.append(f"High review velocity: +{reviews_delta_7d} reviews in 7d")
-                if discussions_delta_1d and discussions_delta_1d > 10:
-                    why_flagged.append(f"Active discussions: +{discussions_delta_1d} threads")
+                if discussions_delta_7d and discussions_delta_7d > 10:
+                    why_flagged.append(f"Active discussions: +{discussions_delta_7d} threads in 7d")
                 if positive_ratio and positive_ratio >= 0.85:
                     why_flagged.append(f"High positive ratio: {int(positive_ratio * 100)}%")
                 
-                # Upsert trends_game_daily
+                # Upsert trends_game_daily (ensure non-null deltas)
                 db.execute(
                     text("""
                         INSERT INTO trends_game_daily
                             (day, steam_app_id, reviews_total, reviews_delta_1d, reviews_delta_7d,
-                             discussions_delta_1d, positive_ratio, tags, computed_at, why_flagged)
+                             discussions_delta_1d, discussions_delta_7d, positive_ratio, tags, computed_at, why_flagged)
                         VALUES
                             (:day, :steam_app_id, :reviews_total, :reviews_delta_1d, :reviews_delta_7d,
-                             :discussions_delta_1d, :positive_ratio, CAST(:tags AS jsonb), :computed_at, CAST(:why_flagged AS jsonb))
+                             :discussions_delta_1d, :discussions_delta_7d, :positive_ratio, CAST(:tags AS jsonb), :computed_at, CAST(:why_flagged AS jsonb))
                         ON CONFLICT (day, steam_app_id) DO UPDATE SET
                             reviews_total = EXCLUDED.reviews_total,
                             reviews_delta_1d = EXCLUDED.reviews_delta_1d,
                             reviews_delta_7d = EXCLUDED.reviews_delta_7d,
                             discussions_delta_1d = EXCLUDED.discussions_delta_1d,
+                            discussions_delta_7d = EXCLUDED.discussions_delta_7d,
                             positive_ratio = EXCLUDED.positive_ratio,
                             tags = EXCLUDED.tags,
                             computed_at = EXCLUDED.computed_at,
@@ -176,10 +181,11 @@ def aggregate_daily_trends(db, target_date: Optional[date] = None, days_back: in
                     {
                         "day": process_date,
                         "steam_app_id": app_id,
-                        "reviews_total": reviews_total,
+                        "reviews_total": int(reviews_total) if reviews_total is not None else None,
                         "reviews_delta_1d": reviews_delta_1d,
-                        "reviews_delta_7d": reviews_delta_7d,
-                        "discussions_delta_1d": discussions_delta_1d,
+                        "reviews_delta_7d": reviews_delta_7d,  # Always non-null (defaults to 0)
+                        "discussions_delta_1d": discussions_delta_1d,  # Always non-null (defaults to 0)
+                        "discussions_delta_7d": discussions_delta_7d,  # Always non-null (defaults to 0)
                         "positive_ratio": positive_ratio,
                         "tags": json.dumps(tags) if tags else None,
                         "computed_at": datetime.now(),
