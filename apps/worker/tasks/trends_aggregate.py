@@ -65,7 +65,7 @@ def aggregate_daily_trends(db, target_date: Optional[date] = None, days_back: in
             for seed in seed_apps:
                 app_id = seed["steam_app_id"]
                 
-                # Get reviews_total from numeric signals (latest on process_date or nearest within 1 day)
+                # Get reviews_total: first try raw signals, then fallback to steam_review_daily
                 reviews_total = _latest_numeric(
                     db, app_id, 'steam_reviews', 'reviews_total', process_date
                 )
@@ -76,7 +76,26 @@ def aggregate_daily_trends(db, target_date: Optional[date] = None, days_back: in
                         db, app_id, 'steam_reviews', 'reviews_total', prev_date
                     )
                 
-                # Get positive_ratio from numeric signals
+                # Fallback to steam_review_daily if still None
+                if reviews_total is None:
+                    review_data = db.execute(
+                        text("""
+                            SELECT all_reviews_count
+                            FROM steam_review_daily
+                            WHERE steam_app_id = :app_id AND day = :process_date
+                            ORDER BY computed_at DESC
+                            LIMIT 1
+                        """),
+                        {"app_id": app_id, "process_date": process_date}
+                    ).scalar()
+                    if review_data is not None:
+                        reviews_total = float(review_data)
+                
+                # Default to 0 if still None (per requirement)
+                if reviews_total is None:
+                    reviews_total = 0.0
+                
+                # Get positive_ratio: first try raw signals, then fallback to steam_review_daily
                 positive_ratio = _latest_numeric(
                     db, app_id, 'steam_reviews', 'positive_ratio', process_date
                 )
@@ -87,11 +106,42 @@ def aggregate_daily_trends(db, target_date: Optional[date] = None, days_back: in
                         db, app_id, 'steam_reviews', 'positive_ratio', prev_date
                     )
                 
+                # Fallback to steam_review_daily if still None
+                if positive_ratio is None:
+                    review_data = db.execute(
+                        text("""
+                            SELECT all_positive_percent
+                            FROM steam_review_daily
+                            WHERE steam_app_id = :app_id AND day = :process_date
+                            ORDER BY computed_at DESC
+                            LIMIT 1
+                        """),
+                        {"app_id": app_id, "process_date": process_date}
+                    ).scalar()
+                    if review_data is not None:
+                        positive_ratio = float(review_data) / 100.0
+                    # Keep NULL if missing (don't force 0.0 per requirement)
+                
                 # Calculate reviews_delta_1d
                 prev_date = process_date - timedelta(days=1)
                 prev_reviews_total = _latest_numeric(
                     db, app_id, 'steam_reviews', 'reviews_total', prev_date
                 )
+                # Fallback to steam_review_daily for previous day
+                if prev_reviews_total is None:
+                    prev_review_data = db.execute(
+                        text("""
+                            SELECT all_reviews_count
+                            FROM steam_review_daily
+                            WHERE steam_app_id = :app_id AND day = :prev_date
+                            ORDER BY computed_at DESC
+                            LIMIT 1
+                        """),
+                        {"app_id": app_id, "prev_date": prev_date}
+                    ).scalar()
+                    if prev_review_data is not None:
+                        prev_reviews_total = float(prev_review_data)
+                
                 reviews_delta_1d = None
                 if reviews_total is not None and prev_reviews_total is not None:
                     reviews_delta_1d = int(reviews_total - prev_reviews_total)
@@ -107,6 +157,36 @@ def aggregate_daily_trends(db, target_date: Optional[date] = None, days_back: in
                     baseline_reviews_total = _latest_numeric(
                         db, app_id, 'steam_reviews', 'reviews_total', six_days_ago
                     )
+                
+                # Fallback to steam_review_daily for baseline
+                if baseline_reviews_total is None:
+                    baseline_review_data = db.execute(
+                        text("""
+                            SELECT all_reviews_count
+                            FROM steam_review_daily
+                            WHERE steam_app_id = :app_id AND day = :seven_days_ago
+                            ORDER BY computed_at DESC
+                            LIMIT 1
+                        """),
+                        {"app_id": app_id, "seven_days_ago": seven_days_ago}
+                    ).scalar()
+                    if baseline_review_data is not None:
+                        baseline_reviews_total = float(baseline_review_data)
+                    # Try 6 days ago if 7 days ago not found
+                    if baseline_reviews_total is None:
+                        six_days_ago = process_date - timedelta(days=6)
+                        baseline_review_data = db.execute(
+                            text("""
+                                SELECT all_reviews_count
+                                FROM steam_review_daily
+                                WHERE steam_app_id = :app_id AND day = :six_days_ago
+                                ORDER BY computed_at DESC
+                                LIMIT 1
+                            """),
+                            {"app_id": app_id, "six_days_ago": six_days_ago}
+                        ).scalar()
+                        if baseline_review_data is not None:
+                            baseline_reviews_total = float(baseline_review_data)
                 
                 reviews_delta_7d = 0  # Default to 0 if missing
                 if reviews_total is not None and baseline_reviews_total is not None:
