@@ -406,6 +406,35 @@ async def collect_trends_signals(
     }
 
 
+@router.post("/admin/ingest_reviews")
+async def ingest_review_signals(
+    days_back: int = Query(0, ge=0, le=7),
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """
+    Ingest numeric signals from steam_review_daily into trends_raw_signals.
+    """
+    from apps.worker.tasks.trends_collectors import ingest_review_signals_from_daily
+    
+    today = date.today()
+    dates_to_process = [today - timedelta(days=i) for i in range(days_back + 1)]
+    
+    seed_apps = db.execute(
+        text("SELECT steam_app_id FROM trends_seed_apps WHERE is_active = true")
+    ).scalars().all()
+    
+    ingested = 0
+    for app_id in seed_apps:
+        for process_date in dates_to_process:
+            if ingest_review_signals_from_daily(db, app_id, process_date):
+                ingested += 1
+    
+    return {
+        "status": "ok",
+        "ingested": ingested
+    }
+
+
 @router.post("/admin/aggregate")
 async def aggregate_trends_daily(
     days_back: int = Query(7, ge=1, le=30),
@@ -445,16 +474,19 @@ async def get_emerging_games(
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
     """
-    Get emerging games based on multiple signals.
-    Returns games even with limited history, computing trend_score from available signals.
+    Get emerging games based on numeric signals (reviews deltas, positive ratio).
+    Excludes evergreen giants (old games with huge review counts) unless they have real spikes.
     """
     today = date.today()
+    three_years_ago = today - timedelta(days=3*365)
     
-    # Get latest daily aggregates for all active seed apps
+    # Get latest daily aggregates for all active seed apps with review data
     query = text("""
         SELECT 
             tgd.steam_app_id,
             tgd.day,
+            tgd.reviews_total,
+            tgd.reviews_delta_1d,
             tgd.reviews_delta_7d,
             tgd.discussions_delta_7d,
             tgd.positive_ratio,
@@ -478,22 +510,39 @@ async def get_emerging_games(
     trending_tags = ["Roguelike", "Survival", "Co-op", "Automation", "Souls-like", "Deckbuilding"]
     
     for row in rows:
-        # Compute trend_score
+        steam_app_id = row["steam_app_id"]
+        release_date = row["release_date"]
+        reviews_total = row["reviews_total"]
+        reviews_delta_7d = row["reviews_delta_7d"]
+        reviews_delta_1d = row["reviews_delta_1d"]
+        positive_ratio = row["positive_ratio"]
+        
+        # Compute trend_score based on numeric signals first
         trend_score = 0
+        why_flagged_parts = []
         
-        # Positive ratio bonus (0-30)
-        if row["positive_ratio"] and row["positive_ratio"] >= 0.85:
-            trend_score += 30
+        # Reviews delta 7d: clamp(reviews_delta_7d / 50, 0, 40)
+        if reviews_delta_7d is not None:
+            score_7d = min(40, max(0, reviews_delta_7d / 50))
+            trend_score += score_7d
+            if reviews_delta_7d > 0:
+                why_flagged_parts.append(f"7d reviews +{reviews_delta_7d}")
         
-        # Reviews delta bonus (0-40, clamped)
-        reviews_delta_7d = row["reviews_delta_7d"] or 0
-        trend_score += min(40, reviews_delta_7d)
+        # Reviews delta 1d: clamp(reviews_delta_1d / 10, 0, 20)
+        if reviews_delta_1d is not None:
+            score_1d = min(20, max(0, reviews_delta_1d / 10))
+            trend_score += score_1d
+            if reviews_delta_1d > 0:
+                why_flagged_parts.append(f"1d +{reviews_delta_1d}")
         
-        # Discussions delta bonus (0-10, clamped)
-        discussions_delta_7d = row["discussions_delta_7d"] or 0
-        trend_score += min(10, discussions_delta_7d)
+        # Positive ratio: clamp((positive_ratio - 0.70) * 50, 0, 20)
+        if positive_ratio is not None:
+            score_pos = min(20, max(0, (positive_ratio - 0.70) * 50))
+            trend_score += score_pos
+            if positive_ratio >= 0.70:
+                why_flagged_parts.append(f"positivity {int(positive_ratio * 100)}%")
         
-        # Tags bonus (0-20)
+        # Tag match: small bonus (+2) only if there are numeric signals
         tags = row["tags"]
         tags_list = []
         if tags:
@@ -506,33 +555,45 @@ async def get_emerging_games(
                 tags_list = tags
         
         has_trending_tag = any(tag in trending_tags for tag in tags_list if isinstance(tag, str))
-        if has_trending_tag:
-            trend_score += 20
+        if has_trending_tag and trend_score > 0:
+            trend_score += 2
+            why_flagged_parts.append("+tag bonus")
         
-        # Build why_flagged
-        why_flagged = []
-        if reviews_delta_7d > 100:
-            why_flagged.append(f"High review velocity: +{reviews_delta_7d} reviews in 7d")
-        if discussions_delta_7d > 10:
-            why_flagged.append(f"Active discussions: +{discussions_delta_7d} threads in 7d")
-        if row["positive_ratio"] and row["positive_ratio"] >= 0.85:
-            why_flagged.append(f"High positive ratio: {int(row['positive_ratio'] * 100)}%")
-        if has_trending_tag:
-            why_flagged.append("Trending tag match")
-        if not why_flagged:
-            why_flagged.append("limited_history")
+        # Hard exclusion: evergreen giants (old + established + no significant spike)
+        # Exclude games that are >3 years old, have >10k reviews, and no significant recent growth
+        # Allow only if they have a real spike (reviews_delta_7d >= 500)
+        is_evergreen_giant = False
+        if release_date and release_date < three_years_ago:
+            if reviews_total and reviews_total >= 10000:
+                # Only allow if there's a significant spike
+                has_significant_spike = (reviews_delta_7d is not None and reviews_delta_7d >= 500)
+                if not has_significant_spike:
+                    is_evergreen_giant = True
+        
+        if is_evergreen_giant:
+            continue  # Skip this game
+        
+        # Only include if there are numeric signals (trend_score > 0 from numeric sources)
+        # Allow games with positive_ratio even if deltas are NULL (limited history)
+        has_numeric_signal = (reviews_delta_7d is not None or reviews_delta_1d is not None or positive_ratio is not None)
+        if trend_score == 0 and not has_numeric_signal:
+            continue  # Skip games with no numeric signals at all
+        
+        # Build why_flagged string
+        why_flagged = ", ".join(why_flagged_parts) if why_flagged_parts else "limited_history"
         
         games_with_scores.append({
-            "steam_app_id": row["steam_app_id"],
+            "steam_app_id": steam_app_id,
             "day": row["day"].isoformat() if row["day"] else None,
-            "trend_score": trend_score,
-            "positive_ratio": float(row["positive_ratio"]) if row["positive_ratio"] else None,
+            "trend_score": round(trend_score, 2),
+            "positive_ratio": float(positive_ratio) if positive_ratio else None,
             "reviews_delta_7d": reviews_delta_7d,
-            "discussions_delta_7d": discussions_delta_7d,
-            "why_flagged": ", ".join(why_flagged) if why_flagged else "limited_history",
+            "reviews_delta_1d": reviews_delta_1d,
+            "discussions_delta_7d": row["discussions_delta_7d"],
+            "why_flagged": why_flagged,
             "tags_sample": tags_list[:5] if tags_list else [],
             "name": row["name"],
-            "release_date": row["release_date"].isoformat() if row["release_date"] else None,
+            "release_date": release_date.isoformat() if release_date else None,
         })
     
     # Sort by trend_score descending

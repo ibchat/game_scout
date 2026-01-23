@@ -397,6 +397,107 @@ def collect_discussions_delta(db, steam_app_id: int) -> bool:
         return False
 
 
+def ingest_review_signals_from_daily(db, steam_app_id: int, target_date: Optional[date] = None) -> bool:
+    """
+    Ingest numeric signals from steam_review_daily into trends_raw_signals.
+    Creates signals for all_reviews_count, all_positive_ratio, and optionally 30d metrics.
+    """
+    if target_date is None:
+        target_date = date.today()
+    
+    logger.info(f"trends_ingest_reviews_start steam_app_id={steam_app_id} date={target_date}")
+    
+    try:
+        # Get review data from steam_review_daily
+        review_data = db.execute(
+            text("""
+                SELECT all_reviews_count, all_positive_percent, 
+                       recent_reviews_count_30d, recent_positive_percent_30d
+                FROM steam_review_daily
+                WHERE steam_app_id = :app_id AND day = :target_date
+                ORDER BY computed_at DESC
+                LIMIT 1
+            """),
+            {"app_id": steam_app_id, "target_date": target_date}
+        ).mappings().first()
+        
+        if not review_data:
+            logger.debug(f"trends_ingest_reviews_skip steam_app_id={steam_app_id} date={target_date} reason=no_data")
+            return False
+        
+        signals_inserted = 0
+        
+        # Insert all_reviews_count signal
+        if review_data["all_reviews_count"] is not None:
+            db.execute(
+                text("""
+                    INSERT INTO trends_raw_signals (steam_app_id, source, signal_type, value_numeric, captured_at)
+                    VALUES (:steam_app_id, 'steam_reviews', 'all_reviews_count', :value, :captured_at)
+                """),
+                {
+                    "steam_app_id": steam_app_id,
+                    "value": float(review_data["all_reviews_count"]),
+                    "captured_at": datetime.now()
+                }
+            )
+            signals_inserted += 1
+        
+        # Insert all_positive_ratio signal (convert percent to 0..1)
+        if review_data["all_positive_percent"] is not None:
+            positive_ratio = float(review_data["all_positive_percent"]) / 100.0
+            db.execute(
+                text("""
+                    INSERT INTO trends_raw_signals (steam_app_id, source, signal_type, value_numeric, captured_at)
+                    VALUES (:steam_app_id, 'steam_reviews', 'all_positive_ratio', :value, :captured_at)
+                """),
+                {
+                    "steam_app_id": steam_app_id,
+                    "value": positive_ratio,
+                    "captured_at": datetime.now()
+                }
+            )
+            signals_inserted += 1
+        
+        # Insert 30d metrics if available
+        if review_data["recent_reviews_count_30d"] is not None:
+            db.execute(
+                text("""
+                    INSERT INTO trends_raw_signals (steam_app_id, source, signal_type, value_numeric, captured_at)
+                    VALUES (:steam_app_id, 'steam_reviews', 'recent_reviews_count_30d', :value, :captured_at)
+                """),
+                {
+                    "steam_app_id": steam_app_id,
+                    "value": float(review_data["recent_reviews_count_30d"]),
+                    "captured_at": datetime.now()
+                }
+            )
+            signals_inserted += 1
+        
+        if review_data["recent_positive_percent_30d"] is not None:
+            recent_positive_ratio = float(review_data["recent_positive_percent_30d"]) / 100.0
+            db.execute(
+                text("""
+                    INSERT INTO trends_raw_signals (steam_app_id, source, signal_type, value_numeric, captured_at)
+                    VALUES (:steam_app_id, 'steam_reviews', 'recent_positive_ratio_30d', :value, :captured_at)
+                """),
+                {
+                    "steam_app_id": steam_app_id,
+                    "value": recent_positive_ratio,
+                    "captured_at": datetime.now()
+                }
+            )
+            signals_inserted += 1
+        
+        db.commit()
+        logger.info(f"trends_ingest_reviews_done steam_app_id={steam_app_id} date={target_date} signals_inserted={signals_inserted}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"trends_ingest_reviews_fail steam_app_id={steam_app_id} date={target_date} error={e}", exc_info=True)
+        db.rollback()
+        return False
+
+
 def aggregate_daily_trends(db, target_date: Optional[date] = None) -> bool:
     """
     Aggregate daily trends from raw signals.
@@ -561,16 +662,13 @@ def aggregate_daily_trends(db, target_date: Optional[date] = None) -> bool:
 if __name__ == "__main__":
     # Standalone runner
     import os
-    from apps.worker.db import get_engine
+    from apps.db.session import get_db_session
     
-    engine = get_engine()
-    Session = sessionmaker(bind=engine)
-    db = Session()
+    db = get_db_session()
     
     # Test collection for app_id 620
     collect_store_snapshot(db, 620)
     collect_reviews_delta(db, 620)
     collect_discussions_delta(db, 620)
-    aggregate_daily_trends(db)
     
     db.close()

@@ -65,15 +65,19 @@ def aggregate_daily_trends(db, target_date: Optional[date] = None, days_back: in
             for seed in seed_apps:
                 app_id = seed["steam_app_id"]
                 
-                # Get reviews_total: first try raw signals, then fallback to steam_review_daily
+                # First, ensure numeric signals are ingested from steam_review_daily
+                from apps.worker.tasks.trends_collectors import ingest_review_signals_from_daily
+                ingest_review_signals_from_daily(db, app_id, process_date)
+                
+                # Get reviews_total: first try raw signals (all_reviews_count), then fallback to steam_review_daily
                 reviews_total = _latest_numeric(
-                    db, app_id, 'steam_reviews', 'reviews_total', process_date
+                    db, app_id, 'steam_reviews', 'all_reviews_count', process_date
                 )
                 if reviews_total is None:
                     # Try previous day if not found
                     prev_date = process_date - timedelta(days=1)
                     reviews_total = _latest_numeric(
-                        db, app_id, 'steam_reviews', 'reviews_total', prev_date
+                        db, app_id, 'steam_reviews', 'all_reviews_count', prev_date
                     )
                 
                 # Fallback to steam_review_daily if still None
@@ -91,19 +95,17 @@ def aggregate_daily_trends(db, target_date: Optional[date] = None, days_back: in
                     if review_data is not None:
                         reviews_total = float(review_data)
                 
-                # Default to 0 if still None (per requirement)
-                if reviews_total is None:
-                    reviews_total = 0.0
+                # Keep NULL if missing (don't force 0 per new requirement)
                 
-                # Get positive_ratio: first try raw signals, then fallback to steam_review_daily
+                # Get positive_ratio: first try raw signals (all_positive_ratio), then fallback to steam_review_daily
                 positive_ratio = _latest_numeric(
-                    db, app_id, 'steam_reviews', 'positive_ratio', process_date
+                    db, app_id, 'steam_reviews', 'all_positive_ratio', process_date
                 )
                 if positive_ratio is None:
                     # Try previous day if not found
                     prev_date = process_date - timedelta(days=1)
                     positive_ratio = _latest_numeric(
-                        db, app_id, 'steam_reviews', 'positive_ratio', prev_date
+                        db, app_id, 'steam_reviews', 'all_positive_ratio', prev_date
                     )
                 
                 # Fallback to steam_review_daily if still None
@@ -125,7 +127,7 @@ def aggregate_daily_trends(db, target_date: Optional[date] = None, days_back: in
                 # Calculate reviews_delta_1d
                 prev_date = process_date - timedelta(days=1)
                 prev_reviews_total = _latest_numeric(
-                    db, app_id, 'steam_reviews', 'reviews_total', prev_date
+                    db, app_id, 'steam_reviews', 'all_reviews_count', prev_date
                 )
                 # Fallback to steam_review_daily for previous day
                 if prev_reviews_total is None:
@@ -149,13 +151,13 @@ def aggregate_daily_trends(db, target_date: Optional[date] = None, days_back: in
                 # Calculate reviews_delta_7d (7-day delta)
                 seven_days_ago = process_date - timedelta(days=7)
                 baseline_reviews_total = _latest_numeric(
-                    db, app_id, 'steam_reviews', 'reviews_total', seven_days_ago
+                    db, app_id, 'steam_reviews', 'all_reviews_count', seven_days_ago
                 )
                 # If baseline not found, try nearest within 1 day
                 if baseline_reviews_total is None:
                     six_days_ago = process_date - timedelta(days=6)
                     baseline_reviews_total = _latest_numeric(
-                        db, app_id, 'steam_reviews', 'reviews_total', six_days_ago
+                        db, app_id, 'steam_reviews', 'all_reviews_count', six_days_ago
                     )
                 
                 # Fallback to steam_review_daily for baseline
@@ -188,21 +190,20 @@ def aggregate_daily_trends(db, target_date: Optional[date] = None, days_back: in
                         if baseline_review_data is not None:
                             baseline_reviews_total = float(baseline_review_data)
                 
-                reviews_delta_7d = 0  # Default to 0 if missing
+                # Calculate reviews_delta_7d: NULL when missing history, not 0
+                reviews_delta_7d = None
                 if reviews_total is not None and baseline_reviews_total is not None:
                     reviews_delta_7d = int(reviews_total - baseline_reviews_total)
-                elif reviews_total is not None:
-                    # If we have current but no baseline, delta is unknown, use 0
-                    reviews_delta_7d = 0
+                # If missing baseline, keep NULL (don't fake zeros)
                 
-                # Get discussion deltas from raw signals
+                # Get discussion deltas from raw signals (keep NULL if missing)
                 discussions_delta_1d = _latest_numeric(
                     db, app_id, 'steam_discussions', 'discussion_threads_7d', process_date
                 )
-                discussions_delta_1d = int(discussions_delta_1d) if discussions_delta_1d is not None else 0
+                discussions_delta_1d = int(discussions_delta_1d) if discussions_delta_1d is not None else None
                 
-                # Calculate discussions_delta_7d (currently 0 as placeholder)
-                discussions_delta_7d = 0  # Placeholder until implemented
+                # Calculate discussions_delta_7d (keep NULL until implemented)
+                discussions_delta_7d = None  # Placeholder until implemented
                 
                 # Get tags from raw signals (text signal, may contain JSON array string)
                 tags_signal = db.execute(
@@ -262,10 +263,10 @@ def aggregate_daily_trends(db, target_date: Optional[date] = None, days_back: in
                         "day": process_date,
                         "steam_app_id": app_id,
                         "reviews_total": int(reviews_total) if reviews_total is not None else None,
-                        "reviews_delta_1d": reviews_delta_1d,
-                        "reviews_delta_7d": reviews_delta_7d,  # Always non-null (defaults to 0)
-                        "discussions_delta_1d": discussions_delta_1d,  # Always non-null (defaults to 0)
-                        "discussions_delta_7d": discussions_delta_7d,  # Always non-null (defaults to 0)
+                        "reviews_delta_1d": reviews_delta_1d,  # NULL when missing history
+                        "reviews_delta_7d": reviews_delta_7d,  # NULL when missing history
+                        "discussions_delta_1d": discussions_delta_1d,  # NULL when missing
+                        "discussions_delta_7d": discussions_delta_7d,  # NULL when missing
                         "positive_ratio": positive_ratio,
                         "tags": json.dumps(tags) if tags else None,
                         "computed_at": datetime.now(),
@@ -465,11 +466,9 @@ def compute_emerging_tags(db, window_days: int = 7) -> Dict[str, Any]:
 if __name__ == "__main__":
     # Standalone runner
     import os
-    from apps.worker.db import get_engine
+    from apps.db.session import get_db_session
     
-    engine = get_engine()
-    Session = sessionmaker(bind=engine)
-    db = Session()
+    db = get_db_session()
     
     result = aggregate_daily_trends(db, date.today(), days_back=7)
     print(f"Aggregation result: {result}")
