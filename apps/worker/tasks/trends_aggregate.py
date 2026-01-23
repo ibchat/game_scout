@@ -1,0 +1,393 @@
+"""
+Trends Scout: Daily Aggregation & Emerging Detection
+Aggregates raw signals into daily trends and computes emerging games/tags.
+"""
+import logging
+from typing import Dict, Any, List, Optional
+from datetime import datetime, date, timedelta
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
+import json
+
+logger = logging.getLogger(__name__)
+
+
+def _latest_numeric(db, app_id: int, source: str, signal_type: str, day: date) -> Optional[float]:
+    """
+    Get latest numeric signal value for a given app, source, signal_type, and day.
+    Returns float or None.
+    """
+    result = db.execute(
+        text("""
+            SELECT value_numeric
+            FROM trends_raw_signals
+            WHERE steam_app_id = :app_id
+              AND source = :source
+              AND signal_type = :signal_type
+              AND DATE(captured_at) = :day
+            ORDER BY captured_at DESC
+            LIMIT 1
+        """),
+        {"app_id": app_id, "source": source, "signal_type": signal_type, "day": day}
+    ).scalar()
+    
+    return float(result) if result is not None else None
+
+
+def aggregate_daily_trends(db, target_date: Optional[date] = None, days_back: int = 0) -> Dict[str, Any]:
+    """
+    Aggregate daily trends from raw signals.
+    If days_back > 0, performs backfill for past days.
+    """
+    if target_date is None:
+        target_date = date.today()
+    
+    dates_to_process = [target_date - timedelta(days=i) for i in range(days_back + 1)]
+    
+    logger.info(f"trends_aggregate_start date={target_date} days_back={days_back} total_dates={len(dates_to_process)}")
+    
+    total_rows = 0
+    error_msg = None
+    
+    for process_date in dates_to_process:
+        try:
+            # Get all active seed apps
+            seed_apps = db.execute(
+                text("""
+                    SELECT steam_app_id, region_hint
+                    FROM trends_seed_apps
+                    WHERE is_active = true
+                """)
+            ).mappings().all()
+            
+            games_processed = 0
+            
+            for seed in seed_apps:
+                app_id = seed["steam_app_id"]
+                
+                # Get reviews data from steam_review_daily (if available)
+                review_data = db.execute(
+                    text("""
+                        SELECT all_reviews_count, all_positive_percent, recent_reviews_count_30d
+                        FROM steam_review_daily
+                        WHERE steam_app_id = :app_id AND day = :process_date
+                        ORDER BY computed_at DESC
+                        LIMIT 1
+                    """),
+                    {"app_id": app_id, "process_date": process_date}
+                ).mappings().first()
+                
+                # Calculate deltas
+                reviews_total = review_data["all_reviews_count"] if review_data else None
+                positive_ratio = review_data["all_positive_percent"] / 100.0 if review_data and review_data["all_positive_percent"] else None
+                
+                # Get previous day for delta calculation
+                prev_date = process_date - timedelta(days=1)
+                prev_review_data = db.execute(
+                    text("""
+                        SELECT all_reviews_count
+                        FROM steam_review_daily
+                        WHERE steam_app_id = :app_id AND day = :prev_date
+                        ORDER BY computed_at DESC
+                        LIMIT 1
+                    """),
+                    {"app_id": app_id, "prev_date": prev_date}
+                ).scalar()
+                
+                reviews_delta_1d = None
+                if reviews_total is not None and prev_review_data is not None:
+                    reviews_delta_1d = reviews_total - prev_review_data
+                
+                # Get 7-day delta
+                seven_days_ago = process_date - timedelta(days=7)
+                prev_7d_data = db.execute(
+                    text("""
+                        SELECT all_reviews_count
+                        FROM steam_review_daily
+                        WHERE steam_app_id = :app_id AND day = :seven_days_ago
+                        ORDER BY computed_at DESC
+                        LIMIT 1
+                    """),
+                    {"app_id": app_id, "seven_days_ago": seven_days_ago}
+                ).scalar()
+                
+                reviews_delta_7d = None
+                if reviews_total is not None and prev_7d_data is not None:
+                    reviews_delta_7d = reviews_total - prev_7d_data
+                
+                # Get discussion deltas from raw signals (numeric signal)
+                discussions_delta_1d = _latest_numeric(
+                    db, app_id, 'steam_discussions', 'discussion_velocity', process_date
+                )
+                
+                # Get tags from raw signals (text signal, may contain JSON array string)
+                tags_signal = db.execute(
+                    text("""
+                        SELECT value_text
+                        FROM trends_raw_signals
+                        WHERE steam_app_id = :app_id
+                          AND source = 'steam_store'
+                          AND signal_type = 'tag_growth'
+                          AND DATE(captured_at) = :process_date
+                        ORDER BY captured_at DESC
+                        LIMIT 1
+                    """),
+                    {"app_id": app_id, "process_date": process_date}
+                ).scalar()
+                
+                tags = None
+                if tags_signal:
+                    if isinstance(tags_signal, str):
+                        try:
+                            tags = json.loads(tags_signal)
+                        except:
+                            tags = None
+                    else:
+                        tags = tags_signal
+                
+                # Compute why_flagged (preliminary)
+                why_flagged = []
+                if reviews_delta_7d and reviews_delta_7d > 100:
+                    why_flagged.append(f"High review velocity: +{reviews_delta_7d} reviews in 7d")
+                if discussions_delta_1d and discussions_delta_1d > 10:
+                    why_flagged.append(f"Active discussions: +{discussions_delta_1d} threads")
+                if positive_ratio and positive_ratio >= 0.85:
+                    why_flagged.append(f"High positive ratio: {int(positive_ratio * 100)}%")
+                
+                # Upsert trends_game_daily
+                db.execute(
+                    text("""
+                        INSERT INTO trends_game_daily
+                            (day, steam_app_id, reviews_total, reviews_delta_1d, reviews_delta_7d,
+                             discussions_delta_1d, positive_ratio, tags, computed_at, why_flagged)
+                        VALUES
+                            (:day, :steam_app_id, :reviews_total, :reviews_delta_1d, :reviews_delta_7d,
+                             :discussions_delta_1d, :positive_ratio, CAST(:tags AS jsonb), :computed_at, CAST(:why_flagged AS jsonb))
+                        ON CONFLICT (day, steam_app_id) DO UPDATE SET
+                            reviews_total = EXCLUDED.reviews_total,
+                            reviews_delta_1d = EXCLUDED.reviews_delta_1d,
+                            reviews_delta_7d = EXCLUDED.reviews_delta_7d,
+                            discussions_delta_1d = EXCLUDED.discussions_delta_1d,
+                            positive_ratio = EXCLUDED.positive_ratio,
+                            tags = EXCLUDED.tags,
+                            computed_at = EXCLUDED.computed_at,
+                            why_flagged = EXCLUDED.why_flagged
+                    """),
+                    {
+                        "day": process_date,
+                        "steam_app_id": app_id,
+                        "reviews_total": reviews_total,
+                        "reviews_delta_1d": reviews_delta_1d,
+                        "reviews_delta_7d": reviews_delta_7d,
+                        "discussions_delta_1d": discussions_delta_1d,
+                        "positive_ratio": positive_ratio,
+                        "tags": json.dumps(tags) if tags else None,
+                        "computed_at": datetime.now(),
+                        "why_flagged": json.dumps(why_flagged) if why_flagged else None,
+                    }
+                )
+                
+                games_processed += 1
+            
+            db.commit()
+            total_rows += games_processed
+            logger.info(f"trends_aggregate_done date={process_date} games_processed={games_processed}")
+            
+        except Exception as e:
+            error_msg = f"trends_aggregate_fail date={process_date} error={repr(e)}"
+            logger.error(error_msg, exc_info=True)
+            db.rollback()
+            return {
+                "ok": False,
+                "rows": total_rows,
+                "error": error_msg
+            }
+    
+    return {
+        "ok": True,
+        "rows": total_rows,
+        "error": None
+    }
+
+
+def compute_emerging_games(
+    db,
+    window_days: int = 7,
+    min_reviews_delta_7d: Optional[int] = None,
+    min_discussions_delta_7d: Optional[int] = None,
+    min_positive_ratio: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Compute emerging games based on daily aggregates.
+    Returns list of games with why_flagged explanations.
+    """
+    cutoff_date = date.today() - timedelta(days=window_days)
+    
+    # Check if we have sufficient history
+    history_days = db.execute(
+        text("""
+            SELECT COUNT(DISTINCT day)
+            FROM trends_game_daily
+            WHERE day >= :cutoff_date
+        """),
+        {"cutoff_date": cutoff_date}
+    ).scalar() or 0
+    
+    if history_days < 2:
+        return {
+            "games": [],
+            "reason": "insufficient_history",
+            "history_days": history_days,
+            "required_days": 2,
+            "message": f"Need at least 2 days of history, found {history_days}"
+        }
+    
+    # Query emerging games
+    query = text("""
+        SELECT 
+            tgd.steam_app_id,
+            tgd.reviews_total,
+            tgd.reviews_delta_7d,
+            tgd.discussions_delta_1d,
+            tgd.positive_ratio,
+            tgd.tags,
+            tgd.why_flagged,
+            f.name,
+            f.release_date,
+            seed.region_hint
+        FROM trends_game_daily tgd
+        JOIN trends_seed_apps seed ON seed.steam_app_id = tgd.steam_app_id
+        LEFT JOIN steam_app_facts f ON f.steam_app_id = tgd.steam_app_id
+        WHERE tgd.day = CURRENT_DATE
+          AND seed.is_active = true
+    """)
+    
+    params = {}
+    
+    if min_reviews_delta_7d is not None:
+        query = text(str(query).replace("WHERE", "WHERE tgd.reviews_delta_7d >= :min_reviews_delta_7d AND"))
+        params["min_reviews_delta_7d"] = min_reviews_delta_7d
+    
+    if min_discussions_delta_7d is not None:
+        query = text(str(query).replace("AND seed.is_active", "AND tgd.discussions_delta_1d >= :min_discussions_delta_7d AND seed.is_active"))
+        params["min_discussions_delta_7d"] = min_discussions_delta_7d
+    
+    if min_positive_ratio is not None:
+        query = text(str(query).replace("AND seed.is_active", "AND tgd.positive_ratio >= :min_positive_ratio AND seed.is_active"))
+        params["min_positive_ratio"] = min_positive_ratio
+    
+    query = text(str(query) + " ORDER BY tgd.reviews_delta_7d DESC NULLS LAST LIMIT 100")
+    
+    rows = db.execute(query, params).mappings().all()
+    
+    games = []
+    for row in rows:
+        why_flagged = row["why_flagged"]
+        if isinstance(why_flagged, str):
+            try:
+                why_flagged = json.loads(why_flagged)
+            except:
+                why_flagged = []
+        elif why_flagged is None:
+            why_flagged = []
+        
+        tags = row["tags"]
+        if isinstance(tags, str):
+            try:
+                tags = json.loads(tags)
+            except:
+                tags = []
+        elif tags is None:
+            tags = []
+        
+        games.append({
+            "steam_app_id": row["steam_app_id"],
+            "name": row["name"],
+            "reviews_total": row["reviews_total"],
+            "reviews_delta_7d": row["reviews_delta_7d"],
+            "discussions_delta_1d": row["discussions_delta_1d"],
+            "positive_ratio": float(row["positive_ratio"]) if row["positive_ratio"] else None,
+            "tags": tags,
+            "why_flagged": why_flagged,
+            "release_date": row["release_date"].isoformat() if row["release_date"] else None,
+            "region_hint": row["region_hint"],
+        })
+    
+    return {
+        "games": games,
+        "reason": "ok",
+        "history_days": history_days,
+        "count": len(games)
+    }
+
+
+def compute_emerging_tags(db, window_days: int = 7) -> Dict[str, Any]:
+    """
+    Compute emerging tags from game daily aggregates.
+    """
+    cutoff_date = date.today() - timedelta(days=window_days)
+    
+    # Aggregate tags from trends_game_daily
+    tag_aggregates = db.execute(
+        text("""
+            WITH tag_expanded AS (
+                SELECT 
+                    tgd.day,
+                    jsonb_array_elements_text(tgd.tags) as tag,
+                    tgd.reviews_delta_7d,
+                    tgd.discussions_delta_1d
+                FROM trends_game_daily tgd
+                WHERE tgd.day >= :cutoff_date
+                  AND tgd.tags IS NOT NULL
+            )
+            SELECT 
+                tag,
+                COUNT(DISTINCT day) as days_present,
+                SUM(COALESCE(reviews_delta_7d, 0)) as total_reviews_delta_7d,
+                SUM(COALESCE(discussions_delta_1d, 0)) as total_discussions_delta_7d
+            FROM tag_expanded
+            GROUP BY tag
+            HAVING COUNT(DISTINCT day) >= 2
+            ORDER BY total_reviews_delta_7d DESC
+            LIMIT 50
+        """),
+        {"cutoff_date": cutoff_date}
+    ).mappings().all()
+    
+    tags = []
+    for row in tag_aggregates:
+        why_flagged = []
+        if row["total_reviews_delta_7d"] and row["total_reviews_delta_7d"] > 100:
+            why_flagged.append(f"High review velocity: +{row['total_reviews_delta_7d']} in 7d")
+        if row["total_discussions_delta_7d"] and row["total_discussions_delta_7d"] > 50:
+            why_flagged.append(f"Active discussions: +{row['total_discussions_delta_7d']} in 7d")
+        
+        tags.append({
+            "tag": row["tag"],
+            "days_present": row["days_present"],
+            "reviews_delta_7d": row["total_reviews_delta_7d"],
+            "discussions_delta_7d": row["total_discussions_delta_7d"],
+            "why_flagged": why_flagged,
+        })
+    
+    return {
+        "tags": tags,
+        "count": len(tags)
+    }
+
+
+if __name__ == "__main__":
+    # Standalone runner
+    import os
+    from apps.worker.db import get_engine
+    
+    engine = get_engine()
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    
+    result = aggregate_daily_trends(db, date.today(), days_back=7)
+    print(f"Aggregation result: {result}")
+    emerging = compute_emerging_games(db, window_days=7)
+    print(f"Emerging games: {emerging['count']}")
+    
+    db.close()

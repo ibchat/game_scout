@@ -417,22 +417,25 @@ async def aggregate_trends_daily(
     from apps.worker.tasks.trends_aggregate import aggregate_daily_trends
     
     try:
-        success = aggregate_daily_trends(db, days_back=days_back)
-        if success:
+        result = aggregate_daily_trends(db, days_back=days_back)
+        if result.get("ok", False):
             return {
                 "status": "ok",
-                "aggregated_rows": days_back + 1  # Approximate: one row per day processed
+                "aggregated_rows": result.get("rows", 0)
             }
         else:
+            error_msg = result.get("error", "Aggregation failed (check logs)")
+            logger.error(f"Aggregate failed: {error_msg}")
             return {
                 "status": "error",
-                "error": "Aggregation failed (check logs)"
+                "error": error_msg
             }
     except Exception as e:
-        logger.error(f"Aggregate failed: {e}", exc_info=True)
+        error_msg = f"Aggregate exception: {repr(e)}"
+        logger.error(error_msg, exc_info=True)
         return {
             "status": "error",
-            "error": str(e)
+            "error": error_msg
         }
 
 
