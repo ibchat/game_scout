@@ -7,6 +7,7 @@ from apps.api.routers import (
     health,
     pitches,
     trends,
+    trends_v1,
     analytics,
     games,
     morning_scan,
@@ -63,13 +64,14 @@ def dashboard():
 # ============================================================
 # Routers
 # ============================================================
+# Единый префикс API v1
+API_V1 = "/api/v1"
+
 # Неформатированные (старые) роуты
 app.include_router(health.router, prefix="")
 app.include_router(pitches.router, prefix="/pitches")
 app.include_router(trends.router, prefix="/trends")
-
-# Единый префикс API v1
-API_V1 = "/api/v1"
+app.include_router(trends_v1.router, prefix=API_V1)
 
 app.include_router(narrative.router, prefix=API_V1)
 app.include_router(analytics.router, prefix=API_V1)
