@@ -210,10 +210,19 @@ async def get_system_summary(db: Session = Depends(get_db_session)) -> Dict[str,
     result["freshness"] = freshness
     
     # Emerging Top 20 - call get_emerging_games and format for dashboard
+    # Use a fresh DB session to avoid transaction conflicts
     try:
         from apps.api.routers.trends_v1 import get_emerging_games
-        emerging_result = await get_emerging_games(limit=20, db=db)
-        games = emerging_result.get("games", [])
+        from apps.api.deps import get_db_session
+        
+        # Get a fresh session for get_emerging_games to avoid transaction conflicts
+        fresh_db = next(get_db_session())
+        try:
+            emerging_result = await get_emerging_games(limit=20, db=fresh_db)
+            games = emerging_result.get("games", [])
+            logger.info(f"get_emerging_games returned {len(games)} games")
+        finally:
+            fresh_db.close()
         
         # Format games for dashboard (they already have all needed fields from get_emerging_games)
         emerging_top20 = []
