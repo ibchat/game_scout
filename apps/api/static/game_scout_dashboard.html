@@ -831,58 +831,72 @@
         </div>
       `;
       
-      // Top 20 Emerging
-      const top20 = summary.emerging_top20 || [];
-      
-      if(top20.length === 0) {
-        emergingStatus.innerHTML = `
-          <div style="padding: 40px; text-align: center; color: var(--muted);">
-            <h3 style="color: var(--orange); margin-bottom: 8px;">Нет Emerging Games</h3>
-            <p>Возможные причины:</p>
-            <ul style="text-align: left; display: inline-block; margin-top: 12px;">
-              <li>Отсутствуют числовые сигналы: ${diag.seeds_missing_numeric_signals || 0} игр</li>
-              <li>Отфильтрованы как evergreen giants: ${diag.filtered_evergreen_giants || 0} игр</li>
-            </ul>
-          </div>
-        `;
-        emergingTable.innerHTML = "";
-      } else {
-        emergingStatus.textContent = `Найдено ${top20.length} игр`;
-        emergingTable.innerHTML = `
-          <table class="table" style="margin-top: 12px;">
-            <thead>
-              <tr>
-                <th>Ранг</th>
-                <th>Название</th>
-                <th>Отзывы</th>
-                <th>Положит. %</th>
-                <th>Δ 1д</th>
-                <th>Δ 7д</th>
-                <th>Score</th>
-                <th>Теги</th>
-                <th>Причина</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${top20.map(g => `
+      // Top 20 Emerging - используем прямой вызов API для получения полного анализа
+      try {
+        const emergingData = await jget(`${API}/trends/games/emerging?limit=20`);
+        const top20 = emergingData.games || [];
+        
+        if(top20.length === 0) {
+          emergingStatus.innerHTML = `
+            <div style="padding: 40px; text-align: center; color: var(--muted);">
+              <h3 style="color: var(--orange); margin-bottom: 8px;">Нет Emerging Games</h3>
+              <p>Возможные причины:</p>
+              <ul style="text-align: left; display: inline-block; margin-top: 12px;">
+                <li>Отсутствуют числовые сигналы: ${diag.seeds_missing_numeric_signals || 0} игр</li>
+                <li>Отфильтрованы как evergreen giants: ${diag.filtered_evergreen_giants || 0} игр</li>
+              </ul>
+            </div>
+          `;
+          emergingTable.innerHTML = "";
+        } else {
+          emergingStatus.textContent = `Найдено ${top20.length} игр`;
+          emergingTable.innerHTML = `
+            <table class="table" style="margin-top: 12px;">
+              <thead>
                 <tr>
-                  <td>${g.rank || ''}</td>
-                  <td>
-                    ${g.name ? `<a href="https://store.steampowered.com/app/${g.steam_app_id}" target="_blank" style="color: var(--blue); text-decoration: none;">${esc(g.name)}</a>` : 'N/A'}
-                    <span style="color: var(--muted); font-size: 11px;"> (#${g.steam_app_id || ''})</span>
-                  </td>
-                  <td>${g.reviews_total || 'N/A'}</td>
-                  <td>${g.positive_ratio ? (g.positive_ratio * 100).toFixed(1) + '%' : 'N/A'}</td>
-                  <td>${g.reviews_delta_1d || 'N/A'}</td>
-                  <td>${g.reviews_delta_7d || 'N/A'}</td>
-                  <td><strong>${g.trend_score || 0}</strong></td>
-                  <td>${(g.tags_sample || []).slice(0, 3).join(', ') || 'N/A'}</td>
-                  <td style="font-size: 11px; color: var(--muted);">${esc(g.why_flagged || 'N/A')}</td>
+                  <th>Ранг</th>
+                  <th>Название</th>
+                  <th>Verdict</th>
+                  <th>Score</th>
+                  <th>Отзывы</th>
+                  <th>Положит. %</th>
+                  <th>Δ 1д</th>
+                  <th>Δ 7д</th>
+                  <th>Объяснение</th>
                 </tr>
-              `).join("")}
-            </tbody>
-          </table>
-        `;
+              </thead>
+              <tbody>
+                ${top20.map((g, idx) => {
+                  const verdict = g.verdict || 'N/A';
+                  const verdictColor = verdict.includes('Strong') ? 'var(--green)' : 
+                                      verdict.includes('Hype') ? 'var(--orange)' : 
+                                      verdict.includes('Weak') ? 'var(--muted)' : 'var(--blue)';
+                  const explanation = (g.explanation || []).slice(0, 2).join('; ') || 'N/A';
+                  
+                  return `
+                    <tr>
+                      <td>${idx + 1}</td>
+                      <td>
+                        ${g.name ? `<a href="https://store.steampowered.com/app/${g.steam_app_id}" target="_blank" style="color: var(--blue); text-decoration: none;">${esc(g.name)}</a>` : 'N/A'}
+                        <span style="color: var(--muted); font-size: 11px;"> (#${g.steam_app_id || ''})</span>
+                      </td>
+                      <td style="color: ${verdictColor}; font-weight: 600;">${esc(verdict)}</td>
+                      <td><strong>${g.emerging_score || g.trend_score || 0}</strong></td>
+                      <td>${g.reviews_total || 'N/A'}</td>
+                      <td>${g.positive_ratio ? (g.positive_ratio * 100).toFixed(1) + '%' : 'N/A'}</td>
+                      <td>${g.reviews_delta_1d || 'N/A'}</td>
+                      <td>${g.reviews_delta_7d || 'N/A'}</td>
+                      <td style="font-size: 11px; color: var(--muted); max-width: 300px;" title="${esc((g.explanation || []).join('; '))}">${esc(explanation)}</td>
+                    </tr>
+                  `;
+                }).join("")}
+              </tbody>
+            </table>
+          `;
+        }
+      } catch(e) {
+        emergingStatus.textContent = `Ошибка загрузки: ${esc(e.message)}`;
+        emergingStatus.style.color = "rgba(255,107,129,0.85)";
       }
       
     }catch(e){
