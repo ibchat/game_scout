@@ -910,7 +910,7 @@
   }
 
   // ==========================================
-  // Источники данных
+  // Источники данных (Сенсоры системы)
   // ==========================================
   async function loadSources(){
     const sourcesList = qs("#sources-list");
@@ -925,17 +925,49 @@
       
       const tt = summary?.trends_today || {};
       const signals = tt.signals_numeric || [];
+      const emergingInfluence = tt.emerging_influence || {};
+      const blindSpots = tt.blind_spots || [];
       
-      let html = '<div class="cards">';
+      let html = '';
+      
+      // 1. Блок "Роль источников"
+      html += `
+        <div style="background: rgba(110,168,255,0.1); border-left: 3px solid var(--blue); padding: 16px; margin-bottom: 24px; border-radius: 4px;">
+          <h3 style="margin: 0 0 8px 0; font-size: 18px; color: var(--blue);">🧠 Роль источников данных</h3>
+          <p style="margin: 0; color: var(--text); line-height: 1.6; font-size: 14px;">
+            Эта вкладка показывает, какие внешние сигналы питают аналитический движок Game Scout.
+            Каждый источник отвечает за отдельный тип интереса: поведенческий, социальный или медийный.
+            Здесь вы видите не только статус подключения, но и реальный вклад источников в поиск emerging-игр.
+          </p>
+        </div>
+      `;
+      
+      // 2. Умные карточки источников
+      html += '<div class="cards" style="margin-bottom: 24px;">';
       
       // Steam Reviews
       const steamReviews = tt.steam_review_daily || 0;
+      const steamActive = steamReviews > 0;
       html += `
-        <div class="kpi">
+        <div class="kpi" style="min-height: 200px;" title="Основной количественный источник. Используется для оценки масштаба игры, качества аудитории и фильтрации evergreen-тайтлов.">
           <div class="label">Steam Reviews</div>
-          <div class="val ${steamReviews > 0 ? 'green' : 'orange'}">${steamReviews > 0 ? 'Есть данные' : 'Нет данных'}</div>
-          <div style="font-size: 12px; margin-top: 4px; color: var(--muted);">
-            Записей сегодня: ${steamReviews}
+          <div class="val ${steamActive ? 'green' : 'orange'}">${steamActive ? '🟢 Активен' : '🟠 Неактивен'}</div>
+          <div style="font-size: 12px; margin-top: 12px; color: var(--muted);">
+            <div style="margin-bottom: 8px;">📊 Записей сегодня: <strong>${steamReviews}</strong></div>
+            <div style="margin-bottom: 8px;">
+              <div style="font-weight: 600; margin-bottom: 4px;">🎯 Используется в:</div>
+              <div style="margin-left: 8px;">• Emerging Score</div>
+              <div style="margin-left: 8px;">• Evergreen Filter</div>
+            </div>
+            <div style="margin-bottom: 8px;">
+              <div style="font-weight: 600; margin-bottom: 4px;">🧠 Сигналы:</div>
+              <div style="margin-left: 8px; font-size: 11px;">• all_reviews_count</div>
+              <div style="margin-left: 8px; font-size: 11px;">• all_positive_ratio</div>
+              <div style="margin-left: 8px; font-size: 11px;">• recent_reviews_count_30d</div>
+            </div>
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);">
+              ⚖️ Вес в скоринге: <strong style="color: var(--green);">высокий</strong>
+            </div>
           </div>
         </div>
       `;
@@ -943,11 +975,22 @@
       // Reddit
       const redditOk = redditHealth?.status === 'ok';
       html += `
-        <div class="kpi">
+        <div class="kpi" style="min-height: 200px;" title="Ранний индикатор обсуждений. Часто срабатывает до роста отзывов в Steam.">
           <div class="label">Reddit</div>
-          <div class="val ${redditOk ? 'green' : 'orange'}">${redditOk ? 'Подключён' : 'Недоступен'}</div>
-          <div style="font-size: 12px; margin-top: 4px; color: var(--muted);">
-            ${redditOk ? 'Источник подключён' : 'Источник подключён, но не участвует в расчётах'}
+          <div class="val ${redditOk ? 'green' : 'orange'}">${redditOk ? '🟢 Подключён' : '🟠 Недоступен'}</div>
+          <div style="font-size: 12px; margin-top: 12px; color: var(--muted);">
+            <div style="margin-bottom: 8px;">📊 Постов сегодня: <strong>N/A</strong></div>
+            <div style="margin-bottom: 8px;">
+              <div style="font-weight: 600; margin-bottom: 4px;">🎯 Используется в:</div>
+              <div style="margin-left: 8px; color: var(--muted);">• Trend detection (phase 2)</div>
+            </div>
+            <div style="margin-bottom: 8px;">
+              <div style="font-weight: 600; margin-bottom: 4px;">🧠 Тип сигнала:</div>
+              <div style="margin-left: 8px; font-size: 11px;">• ранний социальный интерес</div>
+            </div>
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);">
+              ⚖️ Вес в скоринге: <strong style="color: var(--orange);">средний</strong>
+            </div>
           </div>
         </div>
       `;
@@ -955,25 +998,85 @@
       // YouTube
       const youtubeOk = youtubeHealth?.status === 'ok';
       html += `
-        <div class="kpi">
+        <div class="kpi" style="min-height: 200px;" title="Визуальный индикатор интереса. Показывает появление контента о игре.">
           <div class="label">YouTube</div>
-          <div class="val ${youtubeOk ? 'green' : 'orange'}">${youtubeOk ? 'Подключён' : 'Недоступен'}</div>
-          <div style="font-size: 12px; margin-top: 4px; color: var(--muted);">
-            ${youtubeOk ? 'Источник подключён' : 'Источник подключён, но не участвует в расчётах'}
+          <div class="val ${youtubeOk ? 'green' : 'orange'}">${youtubeOk ? '🟢 Подключён' : '🟠 Недоступен'}</div>
+          <div style="font-size: 12px; margin-top: 12px; color: var(--muted);">
+            <div style="margin-bottom: 8px;">📊 Видео сегодня: <strong>N/A</strong></div>
+            <div style="margin-bottom: 8px;">
+              <div style="font-weight: 600; margin-bottom: 4px;">🎯 Используется в:</div>
+              <div style="margin-left: 8px; color: var(--muted);">• Не используется (пока)</div>
+            </div>
+            <div style="margin-bottom: 8px;">
+              <div style="font-weight: 600; margin-bottom: 4px;">🧠 Тип сигнала:</div>
+              <div style="margin-left: 8px; font-size: 11px;">• медийный интерес</div>
+            </div>
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);">
+              ⚖️ Вес в скоринге: <strong style="color: var(--muted);">низкий (пока)</strong>
+            </div>
           </div>
         </div>
       `;
       
       html += '</div>';
       
-      // Signals breakdown
+      // 3. Расширенная таблица числовых сигналов
       if(signals.length > 0) {
-        html += '<h3 style="margin-top: 24px; font-size: 20px;">Числовые сигналы (сегодня)</h3>';
-        html += '<table class="table" style="margin-top: 12px;"><thead><tr><th>Тип</th><th>Всего</th><th>Числовых</th></tr></thead><tbody>';
+        html += '<h3 style="margin-top: 24px; font-size: 20px; margin-bottom: 12px;">Числовые сигналы (сегодня)</h3>';
+        html += '<table class="table" style="margin-top: 12px;"><thead><tr><th>Сигнал</th><th>Источник</th><th>Где используется</th><th>Назначение</th><th>Всего</th><th>Числовых</th></tr></thead><tbody>';
         signals.forEach(s => {
-          html += `<tr><td>${esc(s.signal_type)}</td><td>${s.rows}</td><td>${s.numeric_rows}</td></tr>`;
+          html += `
+            <tr>
+              <td><strong>${esc(s.signal_type || 'N/A')}</strong></td>
+              <td>${esc(s.source || 'Unknown')}</td>
+              <td>${esc(s.usage || 'Не используется')}</td>
+              <td style="color: var(--muted); font-size: 12px;">${esc(s.purpose || 'Не определено')}</td>
+              <td>${s.rows || 0}</td>
+              <td>${s.numeric_rows || 0}</td>
+            </tr>
+          `;
         });
         html += '</tbody></table>';
+      }
+      
+      // 4. Блок "Влияние источников на Emerging"
+      html += `
+        <div style="background: rgba(255,193,7,0.1); border-left: 3px solid var(--orange); padding: 16px; margin-top: 24px; border-radius: 4px;">
+          <h3 style="margin: 0 0 12px 0; font-size: 18px; color: var(--orange);">🔥 Влияние источников на Emerging (сегодня)</h3>
+          <div style="color: var(--text); line-height: 1.8;">
+            <div>🎯 Игр найдено: <strong>${emergingInfluence.games_found || 0}</strong></div>
+            <div>🚫 Отфильтровано как evergreen: <strong>${emergingInfluence.filtered_evergreen || 0}</strong></div>
+            <div style="margin-top: 12px; font-weight: 600;">🧠 По каким сигналам отобраны:</div>
+            <div style="margin-left: 16px; margin-top: 8px;">
+              <div>• Steam Reviews: <strong style="color: var(--green);">${emergingInfluence.sources_contribution?.steam_reviews || 0}%</strong></div>
+              <div>• Reddit: <strong style="color: var(--muted);">${emergingInfluence.sources_contribution?.reddit || 0}%</strong> ${emergingInfluence.sources_contribution?.reddit === 0 ? '(пока не участвует)' : ''}</div>
+              <div>• YouTube: <strong style="color: var(--muted);">${emergingInfluence.sources_contribution?.youtube || 0}%</strong> ${emergingInfluence.sources_contribution?.youtube === 0 ? '(пока не участвует)' : ''}</div>
+            </div>
+            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1); font-style: italic; color: var(--muted); font-size: 13px;">
+              Пока мы фактически Steam-only
+            </div>
+          </div>
+        </div>
+      `;
+      
+      // 5. Блок "Слепые зоны"
+      if(blindSpots.length > 0) {
+        html += `
+          <div style="background: rgba(255,107,129,0.1); border-left: 3px solid rgba(255,107,129,0.85); padding: 16px; margin-top: 24px; border-radius: 4px;">
+            <h3 style="margin: 0 0 12px 0; font-size: 18px; color: rgba(255,107,129,0.85);">⚠️ Слепые зоны данных</h3>
+            <div style="color: var(--text); line-height: 1.8;">
+        `;
+        blindSpots.forEach(spot => {
+          const icon = spot.severity === 'high' ? '🔴' : spot.severity === 'medium' ? '🟠' : '🟡';
+          html += `<div style="margin-bottom: 8px;">${icon} ${esc(spot.message)}</div>`;
+        });
+        html += `
+            </div>
+            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1); font-style: italic; color: var(--muted); font-size: 13px;">
+              Это архитектурная правда, а не баг.
+            </div>
+          </div>
+        `;
       }
       
       sourcesList.innerHTML = html;
