@@ -215,55 +215,67 @@ async def get_system_summary(db: Session = Depends(get_db_session)) -> Dict[str,
         emerging_result = await get_emerging_games(limit=20, db=db)
         games = emerging_result.get("games", [])
         
-        # Enrich with additional data
+        # Enrich with additional data (games already have most fields from get_emerging_games)
         emerging_top20 = []
         for idx, game in enumerate(games, 1):
             app_id = game.get("steam_app_id")
+            if not app_id:
+                continue
             
-            # Get additional fields from trends_game_daily
-            try:
-                game_data = db.execute(
-                    text("""
-                        SELECT 
-                            reviews_total,
-                            positive_ratio,
-                            reviews_delta_1d,
-                            reviews_delta_7d
-                        FROM trends_game_daily
-                        WHERE steam_app_id = :app_id
-                          AND day = :today
-                        LIMIT 1
-                    """),
-                    {"app_id": app_id, "today": today}
-                ).mappings().first()
-                
-                if game_data:
-                    game["reviews_total"] = game_data.get("reviews_total")
-                    game["positive_ratio"] = float(game_data.get("positive_ratio")) if game_data.get("positive_ratio") else None
-                    game["reviews_delta_1d"] = game_data.get("reviews_delta_1d")
-                    game["reviews_delta_7d"] = game_data.get("reviews_delta_7d")
-            except:
-                pass
+            # Get additional fields from trends_game_daily if not already present
+            if not game.get("reviews_total"):
+                try:
+                    game_data = db.execute(
+                        text("""
+                            SELECT 
+                                reviews_total,
+                                positive_ratio,
+                                reviews_delta_1d,
+                                reviews_delta_7d
+                            FROM trends_game_daily
+                            WHERE steam_app_id = :app_id
+                              AND day = :today
+                            LIMIT 1
+                        """),
+                        {"app_id": app_id, "today": today}
+                    ).mappings().first()
+                    
+                    if game_data:
+                        if not game.get("reviews_total"):
+                            game["reviews_total"] = game_data.get("reviews_total")
+                        if not game.get("positive_ratio") and game_data.get("positive_ratio"):
+                            game["positive_ratio"] = float(game_data.get("positive_ratio"))
+                        if not game.get("reviews_delta_1d"):
+                            game["reviews_delta_1d"] = game_data.get("reviews_delta_1d")
+                        if not game.get("reviews_delta_7d"):
+                            game["reviews_delta_7d"] = game_data.get("reviews_delta_7d")
+                except Exception as enrich_err:
+                    logger.debug(f"Failed to enrich game {app_id} from trends_game_daily: {enrich_err}")
             
-            # Get name and release_date from steam_app_facts
-            try:
-                facts = db.execute(
-                    text("""
-                        SELECT name, release_date
-                        FROM steam_app_facts
-                        WHERE steam_app_id = :app_id
-                        LIMIT 1
-                    """),
-                    {"app_id": app_id}
-                ).mappings().first()
-                
-                if facts:
-                    if not game.get("name"):
-                        game["name"] = facts.get("name")
-                    if not game.get("release_date") and facts.get("release_date"):
-                        game["release_date"] = facts.get("release_date").isoformat() if isinstance(facts.get("release_date"), date) else facts.get("release_date")
-            except:
-                pass
+            # Get name and release_date from steam_app_facts if not already present
+            if not game.get("name") or not game.get("release_date"):
+                try:
+                    facts = db.execute(
+                        text("""
+                            SELECT name, release_date
+                            FROM steam_app_facts
+                            WHERE steam_app_id = :app_id
+                            LIMIT 1
+                        """),
+                        {"app_id": app_id}
+                    ).mappings().first()
+                    
+                    if facts:
+                        if not game.get("name"):
+                            game["name"] = facts.get("name")
+                        if not game.get("release_date") and facts.get("release_date"):
+                            rd = facts.get("release_date")
+                            if isinstance(rd, date):
+                                game["release_date"] = rd.isoformat()
+                            elif rd:
+                                game["release_date"] = str(rd)
+                except Exception as enrich_err:
+                    logger.debug(f"Failed to enrich game {app_id} from steam_app_facts: {enrich_err}")
             
             game["rank"] = idx
             emerging_top20.append(game)
