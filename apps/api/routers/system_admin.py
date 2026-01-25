@@ -424,6 +424,10 @@ async def get_system_summary(db: Session = Depends(get_db_session)) -> Dict[str,
     
     result["diagnostics"] = diagnostics
     
+    # Update emerging_influence with filtered_evergreen from diagnostics
+    if "trends_today" in result and "emerging_influence" in result["trends_today"]:
+        result["trends_today"]["emerging_influence"]["filtered_evergreen"] = diagnostics.get("filtered_evergreen_giants", 0)
+    
     return result
 
 
