@@ -577,16 +577,16 @@ async def get_emerging_games(
         
         # Полный анализ игры
         try:
-                analysis = brain.analyze_game(
-                    steam_app_id=steam_app_id,
-                    name=game_name,
-                    release_date=release_date,
-                    reviews_total=reviews_total,
-                    reviews_delta_7d=reviews_delta_7d,
-                    reviews_delta_1d=reviews_delta_1d,
-                    positive_ratio=positive_ratio,
-                    tags=tags_list
-                )
+            analysis = brain.analyze_game(
+                steam_app_id=steam_app_id,
+                name=game_name,
+                release_date=release_date,
+                reviews_total=reviews_total,
+                reviews_delta_7d=reviews_delta_7d,
+                reviews_delta_1d=reviews_delta_1d,
+                positive_ratio=positive_ratio,
+                tags=tags_list
+            )
             
             # Исключаем evergreen giants
             if analysis.flags.is_evergreen_giant:
