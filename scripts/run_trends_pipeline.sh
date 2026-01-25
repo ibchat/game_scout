@@ -48,7 +48,7 @@ echo "   ✓ Seeded apps: $SEEDED_COUNT active"
 # Step 2: Enqueue jobs
 echo ""
 echo "2. Enqueuing collection jobs..."
-COLLECT_RESPONSE=$(curl -sS -X POST "${API_URL}/api/v1/trends/admin/collect?limit=500" 2>&1)
+COLLECT_RESPONSE=$(curl -sS -X POST "${API_URL}/api/v1/trends/admin/collect?limit=100" 2>&1)
 COLLECT_STATUS=$(echo "$COLLECT_RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('status','error'))" 2>&1 || echo "error")
 if [ "$COLLECT_STATUS" = "ok" ]; then
     APP_JOBS=$(echo "$COLLECT_RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); c=d.get('collected',{}); print(c.get('appdetails',0))" 2>&1 || echo "0")
