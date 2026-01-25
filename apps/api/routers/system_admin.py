@@ -187,6 +187,74 @@ async def get_system_summary(db: Session = Depends(get_db_session)) -> Dict[str,
         trends_today["emerging_count"] = 0
         logger.warning(f"Failed to get emerging count: {e}")
     
+    # Emerging influence analysis
+    try:
+        emerging_count = len(result.get("emerging_top20", []))
+        
+        # Count filtered evergreen giants
+        filtered_evergreen = diagnostics.get("filtered_evergreen_giants", 0)
+        
+        # Analyze which sources contribute to emerging
+        emerging_influence = {
+            "games_found": emerging_count,
+            "filtered_evergreen": filtered_evergreen,
+            "sources_contribution": {
+                "steam_reviews": 100,  # Currently Steam-only
+                "reddit": 0,  # Not yet integrated
+                "youtube": 0  # Not yet integrated
+            }
+        }
+        trends_today["emerging_influence"] = emerging_influence
+    except:
+        trends_today["emerging_influence"] = {
+            "games_found": 0,
+            "filtered_evergreen": 0,
+            "sources_contribution": {"steam_reviews": 0, "reddit": 0, "youtube": 0}
+        }
+    
+    # Blind spots detection
+    blind_spots = []
+    try:
+        # Check if Reddit is connected but not used
+        blind_spots.append({
+            "type": "reddit_not_used",
+            "message": "Reddit подключён, но не участвует в scoring",
+            "severity": "medium"
+        })
+        
+        # Check if YouTube is connected but not used
+        blind_spots.append({
+            "type": "youtube_not_used",
+            "message": "YouTube сигналы собираются, но не влияют на Emerging",
+            "severity": "medium"
+        })
+        
+        # Check for missing temporal deltas
+        games_without_deltas = db.execute(
+            text("""
+                SELECT COUNT(DISTINCT steam_app_id)::int
+                FROM trends_game_daily
+                WHERE day = :today
+                  AND reviews_delta_7d IS NULL
+                  AND reviews_delta_1d IS NULL
+            """),
+            {"today": today}
+        ).scalar() or 0
+        
+        total_games = trends_today.get("trends_game_daily", 0)
+        if total_games > 0:
+            pct_without_deltas = (games_without_deltas / total_games) * 100
+            if pct_without_deltas > 10:
+                blind_spots.append({
+                    "type": "missing_temporal_deltas",
+                    "message": f"Нет временных дельт >7 дней для {pct_without_deltas:.1f}% игр",
+                    "severity": "low"
+                })
+    except:
+        pass
+    
+    trends_today["blind_spots"] = blind_spots
+    
     result["trends_today"] = trends_today
     
     # Freshness
