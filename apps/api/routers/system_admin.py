@@ -164,7 +164,7 @@ async def get_system_summary(db: Session = Depends(get_db_session)) -> Dict[str,
     # Get emerging count - call the internal function
     try:
         from apps.api.routers.trends_v1 import get_emerging_games
-        emerging_result = get_emerging_games(limit=50, db=db)
+        emerging_result = await get_emerging_games(limit=50, db=db)
         trends_today["emerging_count"] = emerging_result.get("count", 0)
     except Exception as e:
         trends_today["emerging_count"] = 0
@@ -212,7 +212,7 @@ async def get_system_summary(db: Session = Depends(get_db_session)) -> Dict[str,
     # Emerging Top 20
     try:
         from apps.api.routers.trends_v1 import get_emerging_games
-        emerging_result = get_emerging_games(limit=20, db=db)
+        emerging_result = await get_emerging_games(limit=20, db=db)
         games = emerging_result.get("games", [])
         
         # Enrich with additional data
