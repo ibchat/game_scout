@@ -260,44 +260,85 @@
         </div>
 
     <div class="tabs" id="tabs">
-      <div class="tab active" data-tab="analytics">📊 Аналитика</div>
-      <div class="tab" data-tab="youtube">📺 YouTube</div>
-      <div class="tab" data-tab="reddit">🟠 Reddit</div>
-      <div class="tab" data-tab="games">🎮 База игр</div>
-      <div class="tab" data-tab="relaunch">🚀 Relaunch Scout</div>
-      <div class="tab" data-tab="yearly">📅 Годовой обзор</div>
+      <div class="tab active" data-tab="system" title="Общее состояние системы и жизнеспособность пайплайна данных">📊 Система</div>
+      <div class="tab" data-tab="trends" title="Игры с аномальным ростом интереса и потенциальной инвестиционной привлекательностью">🔥 Тренды</div>
+      <div class="tab" data-tab="sources" title="Источники внешних сигналов, используемых для оценки интереса к играм">🧠 Источники данных</div>
+      <div class="tab" data-tab="games" title="Полный список игр, известных системе">🗂 База игр</div>
+      <div class="tab" data-tab="relaunch" title="Анализ потенциала перезапуска существующих игр">🚀 Relaunch Scout</div>
+      <div class="tab" data-tab="actions" title="Ручное управление этапами пайплайна и диагностика проблем">⚙️ Действия</div>
         </div>
 
-        <!-- Analytics -->
-    <section class="panel" id="panel-analytics">
-      <h2>📊 Аналитика</h2>
-      <div class="status" id="analytics-status">Загрузка…</div>
-      <div class="small">
-        API: <code>/api/v1/analytics/health</code>, <code>/api/v1/analytics/summary</code>
-                </div>
+        <!-- Система -->
+    <section class="panel" id="panel-system">
+      <h2>📊 Система</h2>
+      <div class="status" style="color: rgba(255,255,255,0.82); margin-bottom: 18px;">
+        Общее состояние системы и жизнеспособность пайплайна данных
+      </div>
+      
+      <!-- Статус компонентов -->
+      <div class="cards" id="system-status-cards"></div>
+      
+      <!-- Счетчики Trends Pipeline -->
+      <h3 style="margin-top: 24px; font-size: 20px;">Тренды (сегодня)</h3>
+      <div class="cards" id="trends-pipeline-cards"></div>
+      
+      <!-- Freshness -->
+      <h3 style="margin-top: 24px; font-size: 20px;">Свежесть данных</h3>
+      <div class="status" id="freshness-info">Загрузка…</div>
+      
+      <div class="small" style="margin-top: 12px;">
+        API: <code>/api/v1/admin/system/summary</code>
+      </div>
     </section>
 
-        <!-- YouTube -->
-    <section class="panel hidden" id="panel-youtube">
-      <h2>📺 YouTube</h2>
-      <div class="status" id="youtube-status">Загрузка…</div>
-      <div class="small">
-        API: <code>/api/v1/youtube/health</code>, <code>/api/v1/youtube/summary</code>
-                </div>
+        <!-- Тренды -->
+    <section class="panel hidden" id="panel-trends">
+      <h2>🔥 Тренды (Steam)</h2>
+      <div class="status" style="color: rgba(255,255,255,0.82); margin-bottom: 18px;">
+        Игры с аномальным ростом интереса и потенциальной инвестиционной привлекательностью
+      </div>
+      
+      <!-- Статистика -->
+      <div class="cards" id="trends-stats-cards"></div>
+      
+      <!-- Top 20 Emerging -->
+      <h3 style="margin-top: 24px; font-size: 20px;">Топ-20 Emerging Games</h3>
+      <div class="status" id="trends-emerging-status">Загрузка…</div>
+      <div id="trends-emerging-table"></div>
+      
+      <div class="small" style="margin-top: 12px;">
+        API: <code>/api/v1/admin/system/summary</code>, <code>/api/v1/trends/games/emerging</code>
+      </div>
     </section>
 
-        <!-- Reddit -->
-    <section class="panel hidden" id="panel-reddit">
-      <h2>🟠 Reddit</h2>
-      <div class="status" id="reddit-status">Загрузка…</div>
-      <div class="small">
-        API: <code>/api/v1/reddit/health</code>, <code>/api/v1/reddit/summary</code>
-            </div>
+        <!-- Источники данных -->
+    <section class="panel hidden" id="panel-sources">
+      <h2>🧠 Источники данных</h2>
+      <div class="status" style="color: rgba(255,255,255,0.82); margin-bottom: 18px;">
+        Источники внешних сигналов, используемых для оценки интереса к играм
+      </div>
+      
+      <div id="sources-list"></div>
+      
+      <div class="small" style="margin-top: 12px;">
+        API: <code>/api/v1/admin/system/summary</code>, <code>/api/v1/youtube/health</code>, <code>/api/v1/reddit/health</code>
+      </div>
     </section>
 
         <!-- Games -->
     <section class="panel hidden" id="panel-games">
-      <h2>🎮 База игр</h2>
+      <h2>🗂 База игр</h2>
+      <div class="status" style="color: rgba(255,255,255,0.82); margin-bottom: 18px;">
+        Полный список игр, известных системе
+      </div>
+      
+      <div class="filter" style="margin-top: 12px;">
+        <div class="chip active" data-games-filter="all">Все</div>
+        <div class="chip" data-games-filter="with-reviews">С отзывами</div>
+        <div class="chip" data-games-filter="with-signals">Со сигналами</div>
+        <div class="chip" data-games-filter="in-trends">В трендах</div>
+      </div>
+      
       <div class="status" id="games-status">Загрузка…</div>
       <div class="status" id="games-list" style="margin-top:12px; display:none;"></div>
       <div class="small">
@@ -489,13 +530,29 @@
                             </div>
     </section>
 
-    <!-- Yearly -->
-    <section class="panel hidden" id="panel-yearly">
-      <h2>📅 Годовой обзор</h2>
-      <div class="status" id="yearly-status">Загрузка…</div>
-      <div class="small">
-        API: <code>/api/v1/yearly/health</code>, <code>/api/v1/yearly/summary</code>
-                        </div>
+    <!-- Действия -->
+    <section class="panel hidden" id="panel-actions">
+      <h2>⚙️ Действия / Диагностика</h2>
+      <div class="status" style="color: rgba(255,255,255,0.82); margin-bottom: 18px;">
+        Ручное управление этапами пайплайна и диагностика проблем
+      </div>
+      
+      <div class="row" style="margin-top: 12px;">
+        <button class="btn" id="btn-action-seed">Seed Apps</button>
+        <button class="btn" id="btn-action-collect">Collect Jobs</button>
+        <button class="btn" id="btn-action-ingest">Ingest Reviews</button>
+        <button class="btn" id="btn-action-aggregate">Aggregate</button>
+        <button class="btn primary" id="btn-action-verify">Запустить Pipeline</button>
+      </div>
+      
+      <div class="status" id="action-result" style="display:none; margin-top: 12px;"></div>
+      
+      <h3 style="margin-top: 24px; font-size: 20px;">История действий</h3>
+      <div class="status" id="action-log" style="max-height: 300px; overflow-y: auto; font-family: var(--mono); font-size: 12px;"></div>
+      
+      <div class="small" style="margin-top: 12px;">
+        API: <code>POST /api/v1/admin/system/action</code>
+      </div>
     </section>
 
 <script>
@@ -525,12 +582,12 @@
 
     // Ленивая загрузка: дергаем бэкенд только когда вкладка открыта
     try {
-      if(tab === "analytics") loadAnalytics();
-      else if(tab === "youtube") loadYouTube();
-      else if(tab === "reddit") loadReddit();
+      if(tab === "system") loadSystem();
+      else if(tab === "trends") loadTrends();
+      else if(tab === "sources") loadSources();
       else if(tab === "games") loadGames();
       else if(tab === "relaunch") loadRelaunch();
-      else if(tab === "yearly") loadYearly();
+      else if(tab === "actions") loadActions();
     } catch(e) {
       console.error(`Error loading tab ${tab}:`, e);
     }
@@ -623,86 +680,283 @@
   }
 
   // ==========================================
-  // Analytics
+  // Система
   // ==========================================
-  async function loadAnalytics(){
-    const el = qs("#analytics-status");
-    if(!el) return;
+  async function loadSystem(){
+    const statusCards = qs("#system-status-cards");
+    const pipelineCards = qs("#trends-pipeline-cards");
+    const freshnessEl = qs("#freshness-info");
+    
+    if(!statusCards || !pipelineCards || !freshnessEl) return;
     
     try{
-      el.textContent = "Загрузка...";
-      const health = await jget(`${API}/analytics/health`).catch(() => null);
-      const sum = await jget(`${API}/analytics/summary`).catch(() => null);
+      statusCards.innerHTML = "<div class='status'>Загрузка...</div>";
+      pipelineCards.innerHTML = "";
+      freshnessEl.textContent = "Загрузка...";
       
-      if(health && sum) {
-        el.textContent = `OK: ${health.status || 'unknown'}. Summary: ${JSON.stringify(sum)}`;
-      } else if(health) {
-        el.textContent = `OK: ${health.status || 'unknown'}. Summary недоступен.`;
-                } else {
-        el.textContent = `Backend не отвечает. Проверь, что сервер запущен.`;
-        el.style.color = "rgba(255,107,129,0.85)";
+      const summary = await jget(`${API}/admin/system/summary`).catch(() => null);
+      
+      if(!summary) {
+        statusCards.innerHTML = "<div class='status' style='color: rgba(255,107,129,0.85);'>Ошибка загрузки данных</div>";
+        return;
       }
+      
+      // Статус компонентов
+      const apiOk = summary.api?.ok || false;
+      const dbOk = summary.db?.ok || false;
+      const workerStatus = summary.worker?.status || "unknown";
+      const workerHint = summary.worker?.hint || "";
+      
+      statusCards.innerHTML = `
+        <div class="kpi ${apiOk ? '' : 'val red'}">
+          <div class="label">API</div>
+          <div class="val ${apiOk ? 'green' : 'red'}">${apiOk ? 'OK' : 'FAIL'}</div>
+        </div>
+        <div class="kpi">
+          <div class="label">База данных</div>
+          <div class="val ${dbOk ? 'green' : 'red'}">${dbOk ? 'OK' : 'FAIL'}</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Worker</div>
+          <div class="val ${workerStatus === 'ok' ? 'green' : workerStatus === 'unknown' ? 'orange' : 'red'}">${workerStatus.toUpperCase()}</div>
+          ${workerHint ? `<div style="font-size: 11px; margin-top: 4px; color: var(--muted);">${esc(workerHint)}</div>` : ''}
+        </div>
+      `;
+      
+      // Trends Pipeline Today
+      const tt = summary.trends_today || {};
+      pipelineCards.innerHTML = `
+        <div class="kpi">
+          <div class="label">Seed Apps</div>
+          <div class="val">${tt.seed_apps || 0}</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Reviews (сегодня)</div>
+          <div class="val">${tt.steam_review_daily || 0}</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Game Daily</div>
+          <div class="val">${tt.trends_game_daily || 0}</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Emerging</div>
+          <div class="val green">${tt.emerging_count || 0}</div>
+        </div>
+      `;
+      
+      // Jobs breakdown
+      if(tt.jobs && tt.jobs.length > 0) {
+        const jobsHtml = tt.jobs.map(j => `
+          <div style="padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.05);">
+            <strong>${esc(j.job_type)}</strong>: ${esc(j.status)} = ${j.cnt}
+          </div>
+        `).join("");
+        pipelineCards.innerHTML += `<div class="status" style="margin-top: 12px;"><strong>Jobs:</strong><div style="margin-top: 8px;">${jobsHtml}</div></div>`;
+      }
+      
+      // Freshness
+      const f = summary.freshness || {};
+      const freshnessItems = [
+        ['steam_app_facts_max_fetched_at', 'App Facts'],
+        ['steam_review_daily_max_computed_at', 'Review Daily'],
+        ['trend_jobs_max_updated_at', 'Trend Jobs'],
+        ['trends_game_daily_max_day', 'Game Daily (Day)']
+      ];
+      
+      freshnessEl.innerHTML = freshnessItems.map(([key, label]) => {
+        const value = f[key];
+        return `<div style="padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <strong>${esc(label)}</strong>: ${value ? new Date(value).toLocaleString('ru-RU') : 'N/A'}
+        </div>`;
+      }).join("");
+      
     }catch(e){
-      el.textContent = `Ошибка: ${esc(e.message)}`;
-      el.style.color = "rgba(255,107,129,0.85)";
+      if(statusCards) statusCards.innerHTML = `<div class='status' style='color: rgba(255,107,129,0.85);'>Ошибка: ${esc(e.message)}</div>`;
+      if(freshnessEl) freshnessEl.textContent = `Ошибка: ${esc(e.message)}`;
     }
   }
 
   // ==========================================
-  // YouTube
+  // Тренды
   // ==========================================
-  async function loadYouTube(){
-    const el = qs("#youtube-status");
-    if(!el) return;
+  async function loadTrends(){
+    const statsCards = qs("#trends-stats-cards");
+    const emergingStatus = qs("#trends-emerging-status");
+    const emergingTable = qs("#trends-emerging-table");
+    
+    if(!statsCards || !emergingStatus || !emergingTable) return;
     
     try{
-      el.textContent = "Загрузка...";
-      const health = await jget(`${API}/youtube/health`).catch(() => null);
-      const sum = await jget(`${API}/youtube/summary`).catch(() => null);
+      emergingStatus.textContent = "Загрузка...";
+      emergingTable.innerHTML = "";
       
-      if(health && sum) {
-        el.textContent = `OK: ${health.status || 'unknown'}. Summary: ${JSON.stringify(sum)}`;
-      } else if(health) {
-        el.textContent = `OK: ${health.status || 'unknown'}. Summary недоступен.`;
-      } else {
-        el.textContent = `Backend не отвечает. Проверь, что сервер запущен.`;
-        el.style.color = "rgba(255,107,129,0.85)";
+      const summary = await jget(`${API}/admin/system/summary`).catch(() => null);
+      
+      if(!summary) {
+        emergingStatus.textContent = "Ошибка загрузки данных";
+        emergingStatus.style.color = "rgba(255,107,129,0.85)";
+        return;
       }
+      
+      const tt = summary.trends_today || {};
+      const diag = summary.diagnostics || {};
+      
+      // Статистика
+      statsCards.innerHTML = `
+        <div class="kpi">
+          <div class="label">Emerging найдено</div>
+          <div class="val green">${tt.emerging_count || 0}</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Без сигналов</div>
+          <div class="val orange">${diag.seeds_missing_numeric_signals || 0}</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Исключено (evergreen)</div>
+          <div class="val red">${diag.filtered_evergreen_giants || 0}</div>
+        </div>
+      `;
+      
+      // Top 20 Emerging
+      const top20 = summary.emerging_top20 || [];
+      
+      if(top20.length === 0) {
+        emergingStatus.innerHTML = `
+          <div style="padding: 40px; text-align: center; color: var(--muted);">
+            <h3 style="color: var(--orange); margin-bottom: 8px;">Нет Emerging Games</h3>
+            <p>Возможные причины:</p>
+            <ul style="text-align: left; display: inline-block; margin-top: 12px;">
+              <li>Отсутствуют числовые сигналы: ${diag.seeds_missing_numeric_signals || 0} игр</li>
+              <li>Отфильтрованы как evergreen giants: ${diag.filtered_evergreen_giants || 0} игр</li>
+            </ul>
+          </div>
+        `;
+        emergingTable.innerHTML = "";
+      } else {
+        emergingStatus.textContent = `Найдено ${top20.length} игр`;
+        emergingTable.innerHTML = `
+          <table class="table" style="margin-top: 12px;">
+            <thead>
+              <tr>
+                <th>Ранг</th>
+                <th>Название</th>
+                <th>Отзывы</th>
+                <th>Положит. %</th>
+                <th>Δ 1д</th>
+                <th>Δ 7д</th>
+                <th>Score</th>
+                <th>Теги</th>
+                <th>Причина</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${top20.map(g => `
+                <tr>
+                  <td>${g.rank || ''}</td>
+                  <td>
+                    ${g.name ? `<a href="https://store.steampowered.com/app/${g.steam_app_id}" target="_blank" style="color: var(--blue); text-decoration: none;">${esc(g.name)}</a>` : 'N/A'}
+                    <span style="color: var(--muted); font-size: 11px;"> (#${g.steam_app_id || ''})</span>
+                  </td>
+                  <td>${g.reviews_total || 'N/A'}</td>
+                  <td>${g.positive_ratio ? (g.positive_ratio * 100).toFixed(1) + '%' : 'N/A'}</td>
+                  <td>${g.reviews_delta_1d || 'N/A'}</td>
+                  <td>${g.reviews_delta_7d || 'N/A'}</td>
+                  <td><strong>${g.trend_score || 0}</strong></td>
+                  <td>${(g.tags_sample || []).slice(0, 3).join(', ') || 'N/A'}</td>
+                  <td style="font-size: 11px; color: var(--muted);">${esc(g.why_flagged || 'N/A')}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        `;
+      }
+      
     }catch(e){
-      el.textContent = `Ошибка: ${esc(e.message)}`;
-      el.style.color = "rgba(255,107,129,0.85)";
+      emergingStatus.textContent = `Ошибка: ${esc(e.message)}`;
+      emergingStatus.style.color = "rgba(255,107,129,0.85)";
     }
   }
 
   // ==========================================
-  // Reddit
+  // Источники данных
   // ==========================================
-  async function loadReddit(){
-    const el = qs("#reddit-status");
-    if(!el) return;
+  async function loadSources(){
+    const sourcesList = qs("#sources-list");
+    if(!sourcesList) return;
     
     try{
-      el.textContent = "Загрузка...";
-      const health = await jget(`${API}/reddit/health`).catch(() => null);
-      const sum = await jget(`${API}/reddit/summary`).catch(() => null);
+      sourcesList.innerHTML = "<div class='status'>Загрузка...</div>";
       
-      if(health && sum) {
-        el.textContent = `OK: ${health.status || 'unknown'}. Summary: ${JSON.stringify(sum)}`;
-      } else if(health) {
-        el.textContent = `OK: ${health.status || 'unknown'}. Summary недоступен.`;
-      } else {
-        el.textContent = `Backend не отвечает. Проверь, что сервер запущен.`;
-        el.style.color = "rgba(255,107,129,0.85)";
+      const summary = await jget(`${API}/admin/system/summary`).catch(() => null);
+      const youtubeHealth = await jget(`${API}/youtube/health`).catch(() => null);
+      const redditHealth = await jget(`${API}/reddit/health`).catch(() => null);
+      
+      const tt = summary?.trends_today || {};
+      const signals = tt.signals_numeric || [];
+      
+      let html = '<div class="cards">';
+      
+      // Steam Reviews
+      const steamReviews = tt.steam_review_daily || 0;
+      html += `
+        <div class="kpi">
+          <div class="label">Steam Reviews</div>
+          <div class="val ${steamReviews > 0 ? 'green' : 'orange'}">${steamReviews > 0 ? 'Есть данные' : 'Нет данных'}</div>
+          <div style="font-size: 12px; margin-top: 4px; color: var(--muted);">
+            Записей сегодня: ${steamReviews}
+          </div>
+        </div>
+      `;
+      
+      // Reddit
+      const redditOk = redditHealth?.status === 'ok';
+      html += `
+        <div class="kpi">
+          <div class="label">Reddit</div>
+          <div class="val ${redditOk ? 'green' : 'orange'}">${redditOk ? 'Подключён' : 'Недоступен'}</div>
+          <div style="font-size: 12px; margin-top: 4px; color: var(--muted);">
+            ${redditOk ? 'Источник подключён' : 'Источник подключён, но не участвует в расчётах'}
+          </div>
+        </div>
+      `;
+      
+      // YouTube
+      const youtubeOk = youtubeHealth?.status === 'ok';
+      html += `
+        <div class="kpi">
+          <div class="label">YouTube</div>
+          <div class="val ${youtubeOk ? 'green' : 'orange'}">${youtubeOk ? 'Подключён' : 'Недоступен'}</div>
+          <div style="font-size: 12px; margin-top: 4px; color: var(--muted);">
+            ${youtubeOk ? 'Источник подключён' : 'Источник подключён, но не участвует в расчётах'}
+          </div>
+        </div>
+      `;
+      
+      html += '</div>';
+      
+      // Signals breakdown
+      if(signals.length > 0) {
+        html += '<h3 style="margin-top: 24px; font-size: 20px;">Числовые сигналы (сегодня)</h3>';
+        html += '<table class="table" style="margin-top: 12px;"><thead><tr><th>Тип</th><th>Всего</th><th>Числовых</th></tr></thead><tbody>';
+        signals.forEach(s => {
+          html += `<tr><td>${esc(s.signal_type)}</td><td>${s.rows}</td><td>${s.numeric_rows}</td></tr>`;
+        });
+        html += '</tbody></table>';
       }
+      
+      sourcesList.innerHTML = html;
+      
     }catch(e){
-      el.textContent = `Ошибка: ${esc(e.message)}`;
-      el.style.color = "rgba(255,107,129,0.85)";
+      sourcesList.innerHTML = `<div class='status' style='color: rgba(255,107,129,0.85);'>Ошибка: ${esc(e.message)}</div>`;
     }
   }
 
   // ==========================================
   // Games
   // ==========================================
+  let gamesAll = [];
+  let gamesFilter = "all";
+  
   async function loadGames(){
     const st = qs("#games-status");
     const list = qs("#games-list");
@@ -712,27 +966,12 @@
     try{
       st.textContent = "Загрузка...";
       const health = await jget(`${API}/games/health`).catch(() => null);
-      const rows = await jget(`${API}/games/list?limit=50`).catch(() => []);
+      const rows = await jget(`${API}/games/list?limit=200`).catch(() => []);
       
       if(health && Array.isArray(rows)) {
+        gamesAll = rows;
         st.textContent = `OK: ${health.status || 'unknown'}. Игр: ${rows.length}`;
-        if(rows.length){
-          if(list) {
-            list.style.display = "block";
-            list.innerHTML = rows.map(r => `
-              <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)">
-                <b>${esc(r.name ?? r.title ?? "—")}</b>
-                <span style="color:rgba(255,255,255,0.6)">#${esc(r.steam_app_id ?? r.source_id ?? "—")}</span>
-                <span style="float:right;color:rgba(255,255,255,0.6)">reviews: ${esc(r.review_count ?? r.reviews ?? r.reviews_total ?? "—")}</span>
-                                </div>
-            `).join("");
-          }
-        }else{
-          if(list) {
-            list.style.display = "block";
-            list.textContent = "Пока нет данных игр (таблица не найдена или пуста).";
-          }
-        }
+        renderGames();
       } else {
         st.textContent = `Backend не отвечает. Проверь, что сервер запущен.`;
         st.style.color = "rgba(255,107,129,0.85)";
@@ -744,31 +983,228 @@
       if(list) list.style.display = "none";
     }
   }
+  
+  function renderGames(){
+    const list = qs("#games-list");
+    if(!list) return;
+    
+    let filtered = gamesAll;
+    
+    if(gamesFilter === "with-reviews") {
+      filtered = gamesAll.filter(g => (g.review_count || g.reviews || g.reviews_total) > 0);
+    } else if(gamesFilter === "with-signals") {
+      // TODO: фильтр по наличию сигналов (нужен дополнительный API)
+      filtered = gamesAll;
+    } else if(gamesFilter === "in-trends") {
+      // TODO: фильтр по участию в трендах (нужен дополнительный API)
+      filtered = gamesAll;
+    }
+    
+    if(filtered.length === 0) {
+      list.style.display = "block";
+      list.innerHTML = "Нет игр для отображения";
+      return;
+    }
+    
+    list.style.display = "block";
+    list.innerHTML = filtered.map(r => {
+      const name = r.name || r.title || "—";
+      const appId = r.steam_app_id || r.source_id || "—";
+      const reviews = r.review_count || r.reviews || r.reviews_total || 0;
+      const steamUrl = `https://store.steampowered.com/app/${appId}`;
+      
+      return `
+        <div style="padding:12px; border-bottom:1px solid rgba(255,255,255,0.06); display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <a href="${steamUrl}" target="_blank" style="color: var(--blue); text-decoration: none; font-weight: 700; font-size: 16px;">
+              ${esc(name)}
+            </a>
+            <span style="color:rgba(255,255,255,0.6); margin-left: 8px;">#${esc(appId)}</span>
+          </div>
+          <div style="color:rgba(255,255,255,0.6);">
+            Отзывов: ${reviews}
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+  
+  // Фильтры для игр
+  qsa("#panel-games .chip[data-games-filter]").forEach(ch => {
+    ch.addEventListener("click", () => {
+      qsa("#panel-games .chip").forEach(x => x.classList.remove("active"));
+      ch.classList.add("active");
+      gamesFilter = ch.dataset.gamesFilter || "all";
+      renderGames();
+    });
+  });
 
   // ==========================================
-  // Yearly
+  // Действия
   // ==========================================
-  async function loadYearly(){
-    const el = qs("#yearly-status");
-    if(!el) return;
+  let actionLog = [];
+  
+  function addActionLog(message, isError = false) {
+    const timestamp = new Date().toLocaleTimeString('ru-RU');
+    actionLog.unshift(`[${timestamp}] ${message}`);
+    if(actionLog.length > 50) actionLog.pop();
     
-    try{
-      el.textContent = "Загрузка...";
-      const health = await jget(`${API}/yearly/health`).catch(() => null);
-      const sum = await jget(`${API}/yearly/summary`).catch(() => null);
-      
-      if(health && sum) {
-        el.textContent = `OK: ${health.status || 'unknown'}. Summary: ${JSON.stringify(sum)}`;
-      } else if(health) {
-        el.textContent = `OK: ${health.status || 'unknown'}. Summary недоступен.`;
-                } else {
-        el.textContent = `Backend не отвечает. Проверь, что сервер запущен.`;
-        el.style.color = "rgba(255,107,129,0.85)";
-      }
-    }catch(e){
-      el.textContent = `Ошибка: ${esc(e.message)}`;
-      el.style.color = "rgba(255,107,129,0.85)";
+    const logEl = qs("#action-log");
+    if(logEl) {
+      logEl.innerHTML = actionLog.map(msg => {
+        const color = isError ? 'var(--red)' : 'var(--muted)';
+        return `<div style="color: ${color}; margin: 4px 0;">${esc(msg)}</div>`;
+      }).join("");
     }
+  }
+  
+  async function loadActions(){
+    // Инициализация кнопок уже в HTML, просто обновляем лог
+    addActionLog("Вкладка действий загружена");
+  }
+  
+  // Обработчики кнопок действий
+  const btnSeed = qs("#btn-action-seed");
+  if(btnSeed) {
+    btnSeed.addEventListener("click", async () => {
+      btnSeed.disabled = true;
+      addActionLog("Запуск: Seed Apps...");
+      try {
+        const result = await jpost(`${API}/admin/system/action`, {action: "seed"});
+        addActionLog(`✓ ${result.message || 'Seed завершён'}`);
+        showToast(result.ok ? "Seed выполнен" : "Ошибка seed", !result.ok);
+        if(result.ok) await loadSystem();
+      } catch(e) {
+        addActionLog(`✗ Ошибка: ${e.message}`, true);
+        showToast(`Ошибка: ${e.message}`, true);
+      } finally {
+        btnSeed.disabled = false;
+      }
+    });
+  }
+  
+  const btnCollect = qs("#btn-action-collect");
+  if(btnCollect) {
+    btnCollect.addEventListener("click", async () => {
+      btnCollect.disabled = true;
+      addActionLog("Запуск: Collect Jobs...");
+      try {
+        const result = await jpost(`${API}/admin/system/action`, {action: "collect"});
+        addActionLog(`✓ ${result.message || 'Collect завершён'}`);
+        showToast(result.ok ? "Jobs созданы" : "Ошибка collect", !result.ok);
+        if(result.ok) await loadSystem();
+      } catch(e) {
+        addActionLog(`✗ Ошибка: ${e.message}`, true);
+        showToast(`Ошибка: ${e.message}`, true);
+      } finally {
+        btnCollect.disabled = false;
+      }
+    });
+  }
+  
+  const btnIngest = qs("#btn-action-ingest");
+  if(btnIngest) {
+    btnIngest.addEventListener("click", async () => {
+      btnIngest.disabled = true;
+      addActionLog("Запуск: Ingest Reviews...");
+      try {
+        const result = await jpost(`${API}/admin/system/action`, {action: "ingest_reviews"});
+        addActionLog(`✓ ${result.message || 'Ingest завершён'}`);
+        showToast(result.ok ? "Reviews обработаны" : "Ошибка ingest", !result.ok);
+        if(result.ok) {
+          await loadSystem();
+          await loadTrends();
+        }
+      } catch(e) {
+        addActionLog(`✗ Ошибка: ${e.message}`, true);
+        showToast(`Ошибка: ${e.message}`, true);
+      } finally {
+        btnIngest.disabled = false;
+      }
+    });
+  }
+  
+  const btnAggregate = qs("#btn-action-aggregate");
+  if(btnAggregate) {
+    btnAggregate.addEventListener("click", async () => {
+      btnAggregate.disabled = true;
+      addActionLog("Запуск: Aggregate...");
+      try {
+        const result = await jpost(`${API}/admin/system/action`, {action: "aggregate"});
+        addActionLog(`✓ ${result.message || 'Aggregate завершён'}`);
+        showToast(result.ok ? "Aggregation выполнена" : "Ошибка aggregate", !result.ok);
+        if(result.ok) {
+          await loadSystem();
+          await loadTrends();
+        }
+      } catch(e) {
+        addActionLog(`✗ Ошибка: ${e.message}`, true);
+        showToast(`Ошибка: ${e.message}`, true);
+      } finally {
+        btnAggregate.disabled = false;
+      }
+    });
+  }
+  
+  const btnVerify = qs("#btn-action-verify");
+  if(btnVerify) {
+    btnVerify.addEventListener("click", async () => {
+      btnVerify.disabled = true;
+      addActionLog("Запуск: Полный Pipeline (Seed → Collect → Ingest → Aggregate)...");
+      const resultEl = qs("#action-result");
+      
+      try {
+        // Последовательный запуск всех этапов
+        addActionLog("1/4: Seed Apps...");
+        const seedResult = await jpost(`${API}/admin/system/action`, {action: "seed"});
+        addActionLog(`   ${seedResult.ok ? '✓' : '✗'} ${seedResult.message}`);
+        
+        addActionLog("2/4: Collect Jobs...");
+        const collectResult = await jpost(`${API}/admin/system/action`, {action: "collect"});
+        addActionLog(`   ${collectResult.ok ? '✓' : '✗'} ${collectResult.message}`);
+        
+        // Ждём немного для обработки jobs
+        addActionLog("   Ожидание обработки jobs (10 сек)...");
+        await new Promise(resolve => setTimeout(resolve, 10000));
+        
+        addActionLog("3/4: Ingest Reviews...");
+        const ingestResult = await jpost(`${API}/admin/system/action`, {action: "ingest_reviews"});
+        addActionLog(`   ${ingestResult.ok ? '✓' : '✗'} ${ingestResult.message}`);
+        
+        addActionLog("4/4: Aggregate...");
+        const aggregateResult = await jpost(`${API}/admin/system/action`, {action: "aggregate"});
+        addActionLog(`   ${aggregateResult.ok ? '✓' : '✗'} ${aggregateResult.message}`);
+        
+        addActionLog("✓ Pipeline завершён");
+        showToast("Pipeline выполнен успешно");
+        
+        if(resultEl) {
+          resultEl.style.display = "block";
+          resultEl.innerHTML = `
+            <b>Pipeline выполнен</b><br/>
+            Seed: ${seedResult.ok ? '✓' : '✗'}<br/>
+            Collect: ${collectResult.ok ? '✓' : '✗'}<br/>
+            Ingest: ${ingestResult.ok ? '✓' : '✗'}<br/>
+            Aggregate: ${aggregateResult.ok ? '✓' : '✗'}
+          `;
+        }
+        
+        // Обновляем данные
+        await loadSystem();
+        await loadTrends();
+        
+      } catch(e) {
+        addActionLog(`✗ Ошибка pipeline: ${e.message}`, true);
+        showToast(`Ошибка: ${e.message}`, true);
+        if(resultEl) {
+          resultEl.style.display = "block";
+          resultEl.innerHTML = `<b>Ошибка</b><br/>${esc(e.message)}`;
+          resultEl.style.borderColor = "rgba(255,107,129,0.35)";
+        }
+      } finally {
+        btnVerify.disabled = false;
+      }
+    });
   }
 
   // ==========================================
@@ -1220,8 +1656,8 @@
   // ==========================================
   // Стартовая загрузка
   // ==========================================
-  // По умолчанию грузим аналитику (дешевле) — relaunch подтянется при клике на вкладку.
-  loadAnalytics();
+  // По умолчанию грузим систему (Dev-вкладка)
+  loadSystem();
     </script>
   </div> <!-- wrap -->
 </body>
