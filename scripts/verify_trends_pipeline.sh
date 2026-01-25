@@ -35,7 +35,7 @@ VALUES
 ON CONFLICT (steam_app_id) DO UPDATE SET is_active = EXCLUDED.is_active;
 SQL
 
-SEEDED_COUNT=$(docker compose exec -T postgres psql -U postgres -d game_scout -t -c "SELECT COUNT(*) FROM trends_seed_apps WHERE is_active=true;" 2>&1 | tr -d ' \n' || echo "0")
+SEEDED_COUNT=$(docker compose exec -T postgres psql -U postgres -d game_scout -t -c "SELECT COUNT(*) FROM trends_seed_apps WHERE is_active=true;" 2>&1 | grep -E '^[0-9]+$' | head -1 || echo "0")
 echo "   ✓ Seeded: $SEEDED_COUNT apps"
 
 # Step 2: Enqueue jobs
@@ -119,9 +119,9 @@ fi
 # Step 6: Verification (DB assertions)
 echo ""
 echo "6. Verification (DB assertions)..."
-REVIEWS_TODAY=$(docker compose exec -T postgres psql -U postgres -d game_scout -t -c "SELECT COUNT(*) FROM steam_review_daily WHERE day=CURRENT_DATE;" 2>&1 | tr -d ' \n' || echo "0")
-SIGNALS_NUMERIC=$(docker compose exec -T postgres psql -U postgres -d game_scout -t -c "SELECT COUNT(*) FROM trends_raw_signals WHERE DATE(captured_at)=CURRENT_DATE AND value_numeric IS NOT NULL;" 2>&1 | tr -d ' \n' || echo "0")
-TRENDS_FILLED=$(docker compose exec -T postgres psql -U postgres -d game_scout -t -c "SELECT COUNT(*) FROM trends_game_daily WHERE day=CURRENT_DATE AND reviews_total IS NOT NULL;" 2>&1 | tr -d ' \n' || echo "0")
+REVIEWS_TODAY=$(docker compose exec -T postgres psql -U postgres -d game_scout -t -c "SELECT COUNT(*) FROM steam_review_daily WHERE day=CURRENT_DATE;" 2>&1 | grep -E '^[0-9]+$' | head -1 || echo "0")
+SIGNALS_NUMERIC=$(docker compose exec -T postgres psql -U postgres -d game_scout -t -c "SELECT COUNT(*) FROM trends_raw_signals WHERE DATE(captured_at)=CURRENT_DATE AND value_numeric IS NOT NULL;" 2>&1 | grep -E '^[0-9]+$' | head -1 || echo "0")
+TRENDS_FILLED=$(docker compose exec -T postgres psql -U postgres -d game_scout -t -c "SELECT COUNT(*) FROM trends_game_daily WHERE day=CURRENT_DATE AND reviews_total IS NOT NULL;" 2>&1 | grep -E '^[0-9]+$' | head -1 || echo "0")
 
 echo "   steam_review_daily (today): $REVIEWS_TODAY (required: >= 30)"
 echo "   numeric signals (today): $SIGNALS_NUMERIC (required: >= 60)"
