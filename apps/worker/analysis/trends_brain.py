@@ -222,14 +222,21 @@ class TrendsBrain:
             years_since_release = None
         
         # 1. is_evergreen_giant
+        # Логическое исключение: старые игры с большим количеством отзывов без реального роста
+        # НЕ по ID, а по характеристикам (возраст + отзывы + отсутствие устойчивого всплеска)
         is_evergreen_giant = False
         if years_since_release and years_since_release > 3:
             if reviews_total and reviews_total >= 10000:
-                # Проверяем, есть ли реальный всплеск
-                has_spike = (reviews_delta_7d is not None and reviews_delta_7d >= 500)
+                # Проверяем, есть ли реальный всплеск (не единичный день, а устойчивый рост)
+                has_spike = False
+                if reviews_delta_7d is not None and reviews_delta_7d >= 500:
+                    # Дополнительная проверка: если 1д рост составляет >70% от 7д - это единичный всплеск, не рост
+                    if reviews_delta_1d is None or reviews_delta_1d < reviews_delta_7d * 0.7:
+                        has_spike = True
+                
                 if not has_spike:
                     is_evergreen_giant = True
-                    reasons["is_evergreen_giant"] = f"Возраст {years_since_release:.1f} лет, {reviews_total} отзывов, нет всплеска"
+                    reasons["is_evergreen_giant"] = f"Возраст {years_since_release:.1f} лет, {reviews_total} отзывов, нет устойчивого всплеска"
         
         # 2. is_new_release
         is_new_release = False
