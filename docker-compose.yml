@@ -88,6 +88,24 @@ services:
       - ./db:/app/db
       - exports_data:/data/exports
     command: celery -A apps.worker.celery_app worker --loglevel=info
+    restart: always
+
+  worker_trends:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/game_scout
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./apps:/app/apps
+      - ./db:/app/db
+    command: python -m apps.worker.tasks.trends_jobs
+    restart: always
 
   beat:
     build:

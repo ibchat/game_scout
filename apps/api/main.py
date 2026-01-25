@@ -71,7 +71,6 @@ API_V1 = "/api/v1"
 app.include_router(health.router, prefix="")
 app.include_router(pitches.router, prefix="/pitches")
 app.include_router(trends.router, prefix="/trends")
-app.include_router(trends_v1.router, prefix=API_V1)
 
 app.include_router(narrative.router, prefix=API_V1)
 app.include_router(analytics.router, prefix=API_V1)
@@ -80,6 +79,7 @@ app.include_router(games.router, prefix=API_V1)
 app.include_router(youtube.router, prefix=API_V1)
 app.include_router(reddit.router, prefix=API_V1)
 app.include_router(yearly.router, prefix=API_V1)
+app.include_router(trends_v1.router, prefix=API_V1)
 
 # ✅ ВАЖНО: relaunch подключаем ТОЛЬКО к /api/v1
 # а prefix="/relaunch" задается ВНУТРИ relaunch.py
