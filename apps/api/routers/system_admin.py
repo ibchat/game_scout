@@ -233,20 +233,39 @@ async def get_system_summary(db: Session = Depends(get_db_session)) -> Dict[str,
                 continue
             
             # Get name from DB if not already present
+            # Try multiple sources: steam_app_facts, steam_app_cache
             game_name = game.get("name")
-            if not game_name:
+            if not game_name or not game_name.strip():
                 try:
+                    # Try steam_app_facts first
                     name_result = db.execute(
                         text("""
                             SELECT name
                             FROM steam_app_facts
                             WHERE steam_app_id = :app_id
+                              AND name IS NOT NULL
+                              AND name != ''
                             LIMIT 1
                         """),
                         {"app_id": app_id}
                     ).scalar()
                     if name_result:
                         game_name = name_result
+                    else:
+                        # Fallback to steam_app_cache
+                        name_result = db.execute(
+                            text("""
+                                SELECT name
+                                FROM steam_app_cache
+                                WHERE steam_app_id = :app_id
+                                  AND name IS NOT NULL
+                                  AND name != ''
+                                LIMIT 1
+                            """),
+                            {"app_id": app_id}
+                        ).scalar()
+                        if name_result:
+                            game_name = name_result
                 except Exception as name_err:
                     logger.debug(f"Failed to get name for app {app_id}: {name_err}")
             
