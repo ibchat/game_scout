@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Game Scout — System Dashboard</title>
+  <style>
+    :root{
+      --bg: #0b0f14;
+      --panel: rgba(255,255,255,0.06);
+      --panel2: rgba(255,255,255,0.08);
+      --stroke: rgba(255,255,255,0.10);
+      --text: rgba(255,255,255,0.92);
+      --muted: rgba(255,255,255,0.65);
+      --blue: #6ea8ff;
+      --green: #79e29b;
+      --orange: #ffb86b;
+      --red: #ff6b81;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      background: radial-gradient(1200px 800px at 20% 0%, rgba(110,168,255,0.25), transparent 60%),
+                  radial-gradient(1000px 700px at 80% 10%, rgba(121,226,155,0.18), transparent 55%),
+                  radial-gradient(900px 700px at 50% 100%, rgba(255,184,107,0.10), transparent 60%),
+                  var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .wrap{ max-width: 1400px; margin: 28px auto 60px; padding: 0 18px; }
+    .header{
+      background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.06));
+      border: 1px solid var(--stroke);
+      border-radius: 22px;
+      padding: 26px 26px 22px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+      backdrop-filter: blur(12px);
+      margin-bottom: 18px;
+    }
+    .title{
+      display:flex; align-items:center; gap:14px;
+      font-size: 42px; line-height:1; font-weight: 800;
+      color: var(--blue);
+      margin: 0;
+    }
+    .sub{
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 16px;
+    }
+    .controls{
+      display: flex; gap: 12px; align-items: center; margin-top: 16px;
+    }
+    .btn{
+      padding: 10px 18px;
+      border-radius: 12px;
+      border: 1px solid var(--stroke);
+      background: rgba(110,168,255,0.15);
+      color: var(--blue);
+      cursor: pointer;
+      font-weight: 600;
+      transition: 120ms ease;
+      user-select: none;
+    }
+    .btn:hover{ background: rgba(110,168,255,0.25); }
+    .btn:active{ transform: scale(0.98); }
+    .btn.primary{ background: var(--blue); color: white; }
+    .btn.danger{ background: var(--red); color: white; }
+    .panel{
+      margin-top: 18px;
+      padding: 20px;
+      background: var(--panel);
+      border: 1px solid var(--stroke);
+      border-radius: 22px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+    }
+    .panel h2{ margin: 2px 0 16px; font-size: 24px; color: var(--blue); }
+    .panel h3{ margin: 12px 0 8px; font-size: 18px; color: var(--muted); }
+    .status-grid{
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;
+      margin-top: 12px;
+    }
+    .status-item{
+      padding: 14px;
+      border-radius: 12px;
+      border: 1px solid var(--stroke);
+      background: rgba(0,0,0,0.18);
+    }
+    .status-item.ok{ border-color: var(--green); background: rgba(121,226,155,0.1); }
+    .status-item.fail{ border-color: var(--red); background: rgba(255,107,129,0.1); }
+    .status-item.unknown{ border-color: var(--orange); background: rgba(255,184,107,0.1); }
+    .status-label{ font-size: 12px; color: var(--muted); text-transform: uppercase; }
+    .status-value{ font-size: 20px; font-weight: 700; margin-top: 4px; }
+    .table{
+      width: 100%; border-collapse: collapse; margin-top: 12px;
+    }
+    .table th{
+      text-align: left; padding: 10px; background: rgba(0,0,0,0.2);
+      border-bottom: 1px solid var(--stroke); font-size: 12px; color: var(--muted);
+      text-transform: uppercase;
+    }
+    .table td{
+      padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.05);
+      font-size: 14px;
+    }
+    .table tr:hover{ background: rgba(255,255,255,0.03); }
+    .badge{
+      display: inline-block; padding: 4px 8px; border-radius: 6px;
+      font-size: 11px; font-weight: 600;
+    }
+    .badge.success{ background: var(--green); color: #000; }
+    .badge.warning{ background: var(--orange); color: #000; }
+    .badge.error{ background: var(--red); color: #fff; }
+    .badge.info{ background: var(--blue); color: #fff; }
+    .log{
+      margin-top: 12px; padding: 12px; background: rgba(0,0,0,0.3);
+      border-radius: 8px; font-family: var(--mono); font-size: 12px;
+      max-height: 200px; overflow-y: auto;
+    }
+    .log-entry{ margin: 4px 0; }
+    .log-entry.error{ color: var(--red); }
+    .log-entry.success{ color: var(--green); }
+    .empty-state{
+      padding: 40px; text-align: center; color: var(--muted);
+    }
+    .empty-state h3{ color: var(--orange); margin-bottom: 8px; }
+    .loading{ opacity: 0.5; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <h1 class="title">🔧 System Dashboard</h1>
+      <div class="sub">Monitor system health, trends pipeline, and emerging games</div>
+      <div class="controls">
+        <button class="btn primary" onclick="refreshData()">🔄 Refresh</button>
+        <button class="btn" onclick="triggerAction('seed')">Seed Apps</button>
+        <button class="btn" onclick="triggerAction('collect')">Collect Jobs</button>
+        <button class="btn" onclick="triggerAction('ingest_reviews')">Ingest Reviews</button>
+        <button class="btn" onclick="triggerAction('aggregate')">Aggregate</button>
+        <button class="btn" onclick="triggerAction('verify')">Verify</button>
+        <span style="margin-left: auto; color: var(--muted); font-size: 12px;" id="lastUpdate"></span>
+      </div>
+    </div>
+
+    <div id="errorBox" style="display:none;" class="panel">
+      <h3 style="color: var(--red);">⚠️ Error</h3>
+      <div id="errorText"></div>
+    </div>
+
+    <!-- Status Summary -->
+    <div class="panel">
+      <h2>System Status</h2>
+      <div class="status-grid" id="statusGrid"></div>
+    </div>
+
+    <!-- Trends Pipeline Today -->
+    <div class="panel">
+      <h2>Trends Pipeline (Today)</h2>
+      <div id="trendsToday"></div>
+    </div>
+
+    <!-- Freshness -->
+    <div class="panel">
+      <h2>Data Freshness</h2>
+      <div id="freshness"></div>
+    </div>
+
+    <!-- Quick Actions Log -->
+    <div class="panel">
+      <h2>Action Log</h2>
+      <div class="log" id="actionLog"></div>
+    </div>
+
+    <!-- Top 20 Emerging -->
+    <div class="panel">
+      <h2>Top 20 Emerging Games</h2>
+      <div id="emergingTable"></div>
+    </div>
+
+    <!-- Diagnostics -->
+    <div class="panel">
+      <h2>Diagnostics</h2>
+      <div id="diagnostics"></div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = '/api/v1/admin/system';
+    let autoRefreshInterval = null;
+
+    function log(message, type = 'info') {
+      const logEl = document.getElementById('actionLog');
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logEl.appendChild(entry);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function showError(msg) {
+      const box = document.getElementById('errorBox');
+      const text = document.getElementById('errorText');
+      text.textContent = msg;
+      box.style.display = 'block';
+      setTimeout(() => box.style.display = 'none', 10000);
+    }
+
+    function renderStatus(data) {
+      const grid = document.getElementById('statusGrid');
+      grid.innerHTML = '';
+      
+      const items = [
+        { key: 'api', label: 'API', value: data.api?.ok ? 'OK' : 'FAIL', status: data.api?.ok ? 'ok' : 'fail' },
+        { key: 'db', label: 'Database', value: data.db?.ok ? 'OK' : 'FAIL', status: data.db?.ok ? 'ok' : 'fail' },
+        { key: 'worker', label: 'Worker', value: data.worker?.status?.toUpperCase() || 'UNKNOWN', status: data.worker?.status || 'unknown' }
+      ];
+      
+      items.forEach(item => {
+        const div = document.createElement('div');
+        div.className = `status-item ${item.status}`;
+        div.innerHTML = `
+          <div class="status-label">${item.label}</div>
+          <div class="status-value">${item.value}</div>
+          ${item.key === 'worker' && data.worker?.hint ? `<div style="font-size: 11px; margin-top: 4px; color: var(--muted);">${data.worker.hint}</div>` : ''}
+        `;
+        grid.appendChild(div);
+      });
+    }
+
+    function renderTrendsToday(data) {
+      const el = document.getElementById('trendsToday');
+      if (!data.trends_today) {
+        el.innerHTML = '<div class="empty-state">No data</div>';
+        return;
+      }
+      
+      const tt = data.trends_today;
+      let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">';
+      
+      html += `<div class="status-item"><div class="status-label">Seed Apps</div><div class="status-value">${tt.seed_apps || 0}</div></div>`;
+      html += `<div class="status-item"><div class="status-label">Reviews Today</div><div class="status-value">${tt.steam_review_daily || 0}</div></div>`;
+      html += `<div class="status-item"><div class="status-label">App Facts</div><div class="status-value">${tt.steam_app_facts || 0}</div></div>`;
+      html += `<div class="status-item"><div class="status-label">Game Daily</div><div class="status-value">${tt.trends_game_daily || 0}</div></div>`;
+      html += `<div class="status-item"><div class="status-label">Emerging</div><div class="status-value">${tt.emerging_count || 0}</div></div>`;
+      
+      html += '</div>';
+      
+      if (tt.jobs && tt.jobs.length > 0) {
+        html += '<h3 style="margin-top: 20px;">Jobs</h3><table class="table"><thead><tr><th>Type</th><th>Status</th><th>Count</th></tr></thead><tbody>';
+        tt.jobs.forEach(j => {
+          html += `<tr><td>${j.job_type}</td><td><span class="badge ${j.status === 'success' ? 'success' : j.status === 'failed' ? 'error' : 'info'}">${j.status}</span></td><td>${j.cnt}</td></tr>`;
+        });
+        html += '</tbody></table>';
+      }
+      
+      if (tt.signals_numeric && tt.signals_numeric.length > 0) {
+        html += '<h3 style="margin-top: 20px;">Numeric Signals</h3><table class="table"><thead><tr><th>Type</th><th>Total</th><th>Numeric</th></tr></thead><tbody>';
+        tt.signals_numeric.forEach(s => {
+          html += `<tr><td>${s.signal_type}</td><td>${s.rows}</td><td>${s.numeric_rows}</td></tr>`;
+        });
+        html += '</tbody></table>';
+      }
+      
+      el.innerHTML = html;
+    }
+
+    function renderFreshness(data) {
+      const el = document.getElementById('freshness');
+      if (!data.freshness) {
+        el.innerHTML = '<div class="empty-state">No data</div>';
+        return;
+      }
+      
+      const f = data.freshness;
+      let html = '<table class="table"><thead><tr><th>Source</th><th>Last Update</th></tr></thead><tbody>';
+      
+      const items = [
+        ['steam_app_facts_max_fetched_at', 'App Facts'],
+        ['steam_review_daily_max_computed_at', 'Review Daily'],
+        ['trend_jobs_max_updated_at', 'Trend Jobs'],
+        ['trends_game_daily_max_day', 'Game Daily (Day)']
+      ];
+      
+      items.forEach(([key, label]) => {
+        const value = f[key];
+        html += `<tr><td>${label}</td><td>${value ? new Date(value).toLocaleString() : 'N/A'}</td></tr>`;
+      });
+      
+      html += '</tbody></table>';
+      el.innerHTML = html;
+    }
+
+    function renderEmerging(data) {
+      const el = document.getElementById('emergingTable');
+      const games = data.emerging_top20 || [];
+      const diag = data.diagnostics || {};
+      
+      if (games.length === 0) {
+        el.innerHTML = `
+          <div class="empty-state">
+            <h3>No Emerging Games</h3>
+            <p>Possible reasons:</p>
+            <ul style="text-align: left; display: inline-block; margin-top: 12px;">
+              <li>Missing numeric signals: ${diag.seeds_missing_numeric_signals || 0} seeds</li>
+              <li>Filtered as evergreen giants: ${diag.filtered_evergreen_giants || 0} games</li>
+            </ul>
+          </div>
+        `;
+        return;
+      }
+      
+      let html = '<table class="table"><thead><tr><th>Rank</th><th>App ID</th><th>Name</th><th>Release</th><th>Reviews</th><th>Pos %</th><th>Δ1d</th><th>Δ7d</th><th>Score</th><th>Tags</th><th>Reason</th></tr></thead><tbody>';
+      
+      games.forEach(g => {
+        html += `<tr>
+          <td>${g.rank || ''}</td>
+          <td>${g.steam_app_id || ''}</td>
+          <td>${g.name || 'N/A'}</td>
+          <td>${g.release_date ? new Date(g.release_date).toLocaleDateString() : 'N/A'}</td>
+          <td>${g.reviews_total || 'N/A'}</td>
+          <td>${g.positive_ratio ? (g.positive_ratio * 100).toFixed(1) + '%' : 'N/A'}</td>
+          <td>${g.reviews_delta_1d || 'N/A'}</td>
+          <td>${g.reviews_delta_7d || 'N/A'}</td>
+          <td><strong>${g.trend_score || 0}</strong></td>
+          <td>${(g.tags_sample || []).slice(0, 3).join(', ') || 'N/A'}</td>
+          <td style="font-size: 11px; color: var(--muted);">${g.why_flagged || 'N/A'}</td>
+        </tr>`;
+      });
+      
+      html += '</tbody></table>';
+      el.innerHTML = html;
+    }
+
+    function renderDiagnostics(data) {
+      const el = document.getElementById('diagnostics');
+      const diag = data.diagnostics || {};
+      
+      let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">';
+      html += `<div class="status-item"><div class="status-label">Seeds Missing Signals</div><div class="status-value">${diag.seeds_missing_numeric_signals || 0}</div></div>`;
+      html += `<div class="status-item"><div class="status-label">Filtered Evergreen</div><div class="status-value">${diag.filtered_evergreen_giants || 0}</div></div>`;
+      html += '</div>';
+      
+      if (data.version) {
+        html += `<div style="margin-top: 16px; padding: 12px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+          <strong>Version:</strong> ${data.version.git_sha || 'unknown'}<br>
+          <strong>Started:</strong> ${data.version.started_at ? new Date(data.version.started_at).toLocaleString() : 'N/A'}
+        </div>`;
+      }
+      
+      el.innerHTML = html;
+    }
+
+    async function refreshData() {
+      try {
+        document.body.classList.add('loading');
+        const res = await fetch(API_BASE + '/summary');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        
+        renderStatus(data);
+        renderTrendsToday(data);
+        renderFreshness(data);
+        renderEmerging(data);
+        renderDiagnostics(data);
+        
+        document.getElementById('lastUpdate').textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+        log('Data refreshed', 'success');
+      } catch (e) {
+        showError(`Failed to load data: ${e.message}`);
+        log(`Refresh failed: ${e.message}`, 'error');
+      } finally {
+        document.body.classList.remove('loading');
+      }
+    }
+
+    async function triggerAction(action) {
+      try {
+        log(`Triggering: ${action}...`, 'info');
+        const res = await fetch(API_BASE + '/action', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({action})
+        });
+        const result = await res.json();
+        
+        if (result.ok) {
+          log(`${action}: ${result.message}`, 'success');
+          setTimeout(refreshData, 1000);
+        } else {
+          log(`${action} failed: ${result.message}`, 'error');
+        }
+      } catch (e) {
+        log(`Action ${action} error: ${e.message}`, 'error');
+      }
+    }
+
+    // Auto-refresh every 30 seconds
+    function startAutoRefresh() {
+      if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+      autoRefreshInterval = setInterval(refreshData, 30000);
+    }
+
+    // Initial load
+    refreshData();
+    startAutoRefresh();
+  </script>
+</body>
+</html>

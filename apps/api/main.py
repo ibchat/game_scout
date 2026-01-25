@@ -15,6 +15,7 @@ from apps.api.routers import (
     youtube,
     reddit,
     yearly,
+    system_admin,
 )
 
 # relaunch может быть новым модулем — импорт отдельно,
@@ -80,6 +81,7 @@ app.include_router(youtube.router, prefix=API_V1)
 app.include_router(reddit.router, prefix=API_V1)
 app.include_router(yearly.router, prefix=API_V1)
 app.include_router(trends_v1.router, prefix=API_V1)
+app.include_router(system_admin.router, prefix=API_V1)
 
 # ✅ ВАЖНО: relaunch подключаем ТОЛЬКО к /api/v1
 # а prefix="/relaunch" задается ВНУТРИ relaunch.py
