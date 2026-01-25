@@ -209,76 +209,39 @@ async def get_system_summary(db: Session = Depends(get_db_session)) -> Dict[str,
     
     result["freshness"] = freshness
     
-    # Emerging Top 20
+    # Emerging Top 20 - call get_emerging_games and format for dashboard
     try:
         from apps.api.routers.trends_v1 import get_emerging_games
         emerging_result = await get_emerging_games(limit=20, db=db)
         games = emerging_result.get("games", [])
         
-        # Enrich with additional data (games already have most fields from get_emerging_games)
+        # Format games for dashboard (they already have all needed fields from get_emerging_games)
         emerging_top20 = []
         for idx, game in enumerate(games, 1):
             app_id = game.get("steam_app_id")
             if not app_id:
                 continue
             
-            # Get additional fields from trends_game_daily if not already present
-            if not game.get("reviews_total"):
-                try:
-                    game_data = db.execute(
-                        text("""
-                            SELECT 
-                                reviews_total,
-                                positive_ratio,
-                                reviews_delta_1d,
-                                reviews_delta_7d
-                            FROM trends_game_daily
-                            WHERE steam_app_id = :app_id
-                              AND day = :today
-                            LIMIT 1
-                        """),
-                        {"app_id": app_id, "today": today}
-                    ).mappings().first()
-                    
-                    if game_data:
-                        if not game.get("reviews_total"):
-                            game["reviews_total"] = game_data.get("reviews_total")
-                        if not game.get("positive_ratio") and game_data.get("positive_ratio"):
-                            game["positive_ratio"] = float(game_data.get("positive_ratio"))
-                        if not game.get("reviews_delta_1d"):
-                            game["reviews_delta_1d"] = game_data.get("reviews_delta_1d")
-                        if not game.get("reviews_delta_7d"):
-                            game["reviews_delta_7d"] = game_data.get("reviews_delta_7d")
-                except Exception as enrich_err:
-                    logger.debug(f"Failed to enrich game {app_id} from trends_game_daily: {enrich_err}")
+            # Format game object with all required fields for dashboard
+            formatted = {
+                "rank": idx,
+                "steam_app_id": app_id,
+                "name": game.get("name"),
+                "day": game.get("day"),
+                "release_date": game.get("release_date"),
+                "reviews_total": game.get("reviews_total"),
+                "positive_ratio": game.get("positive_ratio"),
+                "reviews_delta_1d": game.get("reviews_delta_1d"),
+                "reviews_delta_7d": game.get("reviews_delta_7d"),
+                "score": game.get("trend_score", 0),
+                "trend_score": game.get("trend_score", 0),
+                "tags": game.get("tags_sample", []),
+                "tags_sample": game.get("tags_sample", []),
+                "why_flagged": game.get("why_flagged", ""),
+                "debug_reason": game.get("why_flagged", "")
+            }
             
-            # Get name and release_date from steam_app_facts if not already present
-            if not game.get("name") or not game.get("release_date"):
-                try:
-                    facts = db.execute(
-                        text("""
-                            SELECT name, release_date
-                            FROM steam_app_facts
-                            WHERE steam_app_id = :app_id
-                            LIMIT 1
-                        """),
-                        {"app_id": app_id}
-                    ).mappings().first()
-                    
-                    if facts:
-                        if not game.get("name"):
-                            game["name"] = facts.get("name")
-                        if not game.get("release_date") and facts.get("release_date"):
-                            rd = facts.get("release_date")
-                            if isinstance(rd, date):
-                                game["release_date"] = rd.isoformat()
-                            elif rd:
-                                game["release_date"] = str(rd)
-                except Exception as enrich_err:
-                    logger.debug(f"Failed to enrich game {app_id} from steam_app_facts: {enrich_err}")
-            
-            game["rank"] = idx
-            emerging_top20.append(game)
+            emerging_top20.append(formatted)
         
         result["emerging_top20"] = emerging_top20
     except Exception as e:
