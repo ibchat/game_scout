@@ -189,10 +189,11 @@ async def get_system_summary(db: Session = Depends(get_db_session)) -> Dict[str,
     
     # Emerging influence analysis
     try:
-        emerging_count = len(result.get("emerging_top20", []))
+        # Use emerging_count from trends_today (already computed)
+        emerging_count = trends_today.get("emerging_count", 0)
         
-        # Count filtered evergreen giants
-        filtered_evergreen = diagnostics.get("filtered_evergreen_giants", 0)
+        # Count filtered evergreen giants (will be computed later in diagnostics)
+        filtered_evergreen = 0  # Will be set from diagnostics
         
         # Analyze which sources contribute to emerging
         emerging_influence = {
