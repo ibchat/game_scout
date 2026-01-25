@@ -145,8 +145,25 @@ async def get_system_summary(db: Session = Depends(get_db_session)) -> Dict[str,
             """),
             {"today": today}
         ).mappings().all()
+        
+        # Map signal types to sources and usage
+        signal_mapping = {
+            "all_reviews_count": {"source": "Steam", "usage": "Emerging, Evergreen filter", "purpose": "Масштаб игры"},
+            "recent_reviews_count_30d": {"source": "Steam", "usage": "Emerging score", "purpose": "Скорость роста"},
+            "all_positive_ratio": {"source": "Steam", "usage": "Quality filter", "purpose": "Качество аудитории"},
+            "reviews_delta_7d": {"source": "Steam", "usage": "Emerging score", "purpose": "Рост за неделю"},
+            "reviews_delta_1d": {"source": "Steam", "usage": "Emerging score", "purpose": "Рост за день"},
+        }
+        
         trends_today["signals_numeric"] = [
-            {"signal_type": s["signal_type"], "rows": s["rows"], "numeric_rows": s["numeric_rows"]}
+            {
+                "signal_type": s["signal_type"],
+                "rows": s["rows"],
+                "numeric_rows": s["numeric_rows"],
+                "source": signal_mapping.get(s["signal_type"], {}).get("source", "Unknown"),
+                "usage": signal_mapping.get(s["signal_type"], {}).get("usage", "Не используется"),
+                "purpose": signal_mapping.get(s["signal_type"], {}).get("purpose", "Не определено")
+            }
             for s in signals
         ]
     except:
