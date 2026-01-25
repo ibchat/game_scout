@@ -187,7 +187,109 @@ async def get_system_summary(db: Session = Depends(get_db_session)) -> Dict[str,
         trends_today["emerging_count"] = 0
         logger.warning(f"Failed to get emerging count: {e}")
     
-    # Emerging influence analysis
+    # Signals coverage and freshness
+    signals_coverage = {}
+    signals_freshness = {}
+    
+    try:
+        today = date.today()
+        week_ago = today - timedelta(days=7)
+        
+        # Total seed apps
+        total_seed_apps = trends_today.get("seed_apps", 0)
+        
+        # Steam coverage
+        games_with_steam = db.execute(
+            text("""
+                SELECT COUNT(DISTINCT steam_app_id)::int
+                FROM trends_raw_signals
+                WHERE DATE(captured_at) = :today
+                  AND source = 'steam_reviews'
+                  AND value_numeric IS NOT NULL
+            """),
+            {"today": today}
+        ).scalar() or 0
+        
+        steam_last_day = db.execute(
+            text("""
+                SELECT MAX(DATE(captured_at))::date
+                FROM trends_raw_signals
+                WHERE source = 'steam_reviews'
+            """)
+        ).scalar()
+        
+        signals_coverage["steam"] = {
+            "apps_with_signals": games_with_steam,
+            "total_apps": total_seed_apps,
+            "pct": round((games_with_steam / total_seed_apps * 100) if total_seed_apps > 0 else 0, 1)
+        }
+        signals_freshness["steam_last_day"] = steam_last_day.isoformat() if steam_last_day else None
+        
+        # Reddit coverage (7d window)
+        games_with_reddit = db.execute(
+            text("""
+                SELECT COUNT(DISTINCT steam_app_id)::int
+                FROM trends_raw_signals
+                WHERE DATE(captured_at) >= :week_ago
+                  AND source = 'reddit'
+                  AND value_numeric IS NOT NULL
+            """),
+            {"week_ago": week_ago}
+        ).scalar() or 0
+        
+        reddit_last_day = db.execute(
+            text("""
+                SELECT MAX(DATE(captured_at))::date
+                FROM trends_raw_signals
+                WHERE source = 'reddit'
+            """)
+        ).scalar()
+        
+        signals_coverage["reddit"] = {
+            "apps_with_signals": games_with_reddit,
+            "total_apps": total_seed_apps,
+            "pct": round((games_with_reddit / total_seed_apps * 100) if total_seed_apps > 0 else 0, 1)
+        }
+        signals_freshness["reddit_last_day"] = reddit_last_day.isoformat() if reddit_last_day else None
+        
+        # YouTube coverage (7d window)
+        games_with_youtube = db.execute(
+            text("""
+                SELECT COUNT(DISTINCT steam_app_id)::int
+                FROM trends_raw_signals
+                WHERE DATE(captured_at) >= :week_ago
+                  AND source = 'youtube'
+                  AND value_numeric IS NOT NULL
+            """),
+            {"week_ago": week_ago}
+        ).scalar() or 0
+        
+        youtube_last_day = db.execute(
+            text("""
+                SELECT MAX(DATE(captured_at))::date
+                FROM trends_raw_signals
+                WHERE source = 'youtube'
+            """)
+        ).scalar()
+        
+        signals_coverage["youtube"] = {
+            "apps_with_signals": games_with_youtube,
+            "total_apps": total_seed_apps,
+            "pct": round((games_with_youtube / total_seed_apps * 100) if total_seed_apps > 0 else 0, 1)
+        }
+        signals_freshness["youtube_last_day"] = youtube_last_day.isoformat() if youtube_last_day else None
+        
+    except Exception as e:
+        logger.error(f"Failed to compute signals coverage: {e}", exc_info=True)
+        signals_coverage = {"steam": {"apps_with_signals": 0, "total_apps": 0, "pct": 0},
+                           "reddit": {"apps_with_signals": 0, "total_apps": 0, "pct": 0},
+                           "youtube": {"apps_with_signals": 0, "total_apps": 0, "pct": 0}}
+        signals_freshness = {"steam_last_day": None, "reddit_last_day": None, "youtube_last_day": None}
+    
+    trends_today["signals_coverage"] = signals_coverage
+    trends_today["signals_freshness"] = signals_freshness
+    
+    # Emerging influence analysis (based on actual brain components)
     try:
         # Use emerging_count from trends_today (already computed)
         emerging_count = trends_today.get("emerging_count", 0)
@@ -195,68 +297,36 @@ async def get_system_summary(db: Session = Depends(get_db_session)) -> Dict[str,
         # Count filtered evergreen giants (will be computed later in diagnostics)
         filtered_evergreen = 0  # Will be set from diagnostics
         
-        # Analyze which sources contribute to emerging (calculate from actual data)
-        # Count games with each source signal
-        try:
-            today = date.today()
-            games_with_steam = db.execute(
-                text("""
-                    SELECT COUNT(DISTINCT steam_app_id)::int
-                    FROM trends_raw_signals
-                    WHERE DATE(captured_at) = :today
-                      AND source = 'steam_reviews'
-                      AND value_numeric IS NOT NULL
-                """),
-                {"today": today}
-            ).scalar() or 0
-            
-            games_with_reddit = db.execute(
-                text("""
-                    SELECT COUNT(DISTINCT steam_app_id)::int
-                    FROM trends_raw_signals
-                    WHERE DATE(captured_at) = :today
-                      AND source = 'reddit'
-                      AND value_numeric IS NOT NULL
-                """),
-                {"today": today}
-            ).scalar() or 0
-            
-            games_with_youtube = db.execute(
-                text("""
-                    SELECT COUNT(DISTINCT steam_app_id)::int
-                    FROM trends_raw_signals
-                    WHERE DATE(captured_at) = :today
-                      AND source = 'youtube'
-                      AND value_numeric IS NOT NULL
-                """),
-                {"today": today}
-            ).scalar() or 0
-            
-            total_games_with_signals = max(1, games_with_steam + games_with_reddit + games_with_youtube)
-            
-            # Calculate percentages (Steam is always base, Reddit/YouTube are additions)
-            steam_pct = int((games_with_steam / total_games_with_signals) * 100) if total_games_with_signals > 0 else 100
-            reddit_pct = int((games_with_reddit / total_games_with_signals) * 100) if total_games_with_signals > 0 else 0
-            youtube_pct = int((games_with_youtube / total_games_with_signals) * 100) if total_games_with_signals > 0 else 0
-            
-            # Normalize to 100% (Steam is base, others are additions)
-            # If all have signals, Steam=72%, Reddit=18%, YouTube=10% (примерно)
-            if games_with_steam > 0 and games_with_reddit > 0 and games_with_youtube > 0:
-                steam_pct = 72
-                reddit_pct = 18
-                youtube_pct = 10
-            elif games_with_steam > 0 and games_with_reddit > 0:
-                steam_pct = 85
-                reddit_pct = 15
-                youtube_pct = 0
-            elif games_with_steam > 0:
-                steam_pct = 100
-                reddit_pct = 0
-                youtube_pct = 0
-        except:
-            steam_pct = 100
-            reddit_pct = 0
-            youtube_pct = 0
+        # Calculate source influence from actual emerging games
+        if emerging_count > 0:
+            # Get emerging games and analyze their components
+            from apps.api.routers.trends_v1 import get_emerging_games
+            try:
+                db.rollback()  # Clean state
+                emerging_result = await get_emerging_games(limit=50, db=db)
+                games = emerging_result.get("games", [])
+                
+                games_with_steam_comp = sum(1 for g in games if g.get("score_components", {}).get("confirmation_component", 0) > 0)
+                games_with_reddit_comp = sum(1 for g in games if g.get("score_components", {}).get("early_signal_component", 0) > 0)
+                games_with_youtube_comp = sum(1 for g in games if g.get("score_components", {}).get("momentum_component", 0) > 0)
+                
+                # Calculate percentages based on components
+                if emerging_count > 0:
+                    steam_pct = round((games_with_steam_comp / emerging_count) * 100, 1)
+                    reddit_pct = round((games_with_reddit_comp / emerging_count) * 100, 1)
+                    youtube_pct = round((games_with_youtube_comp / emerging_count) * 100, 1)
+                else:
+                    steam_pct = reddit_pct = youtube_pct = 0
+            except:
+                # Fallback: use signals coverage
+                steam_pct = signals_coverage.get("steam", {}).get("pct", 0)
+                reddit_pct = signals_coverage.get("reddit", {}).get("pct", 0)
+                youtube_pct = signals_coverage.get("youtube", {}).get("pct", 0)
+        else:
+            # No emerging games: show coverage instead
+            steam_pct = signals_coverage.get("steam", {}).get("pct", 0)
+            reddit_pct = signals_coverage.get("reddit", {}).get("pct", 0)
+            youtube_pct = signals_coverage.get("youtube", {}).get("pct", 0)
         
         # Analyze which sources contribute to emerging
         emerging_influence = {
@@ -266,14 +336,16 @@ async def get_system_summary(db: Session = Depends(get_db_session)) -> Dict[str,
                 "steam_reviews": steam_pct,
                 "reddit": reddit_pct,
                 "youtube": youtube_pct
-            }
+            },
+            "computed_from": "brain_components" if emerging_count > 0 else "signals_coverage"
         }
         trends_today["emerging_influence"] = emerging_influence
     except:
         trends_today["emerging_influence"] = {
             "games_found": 0,
             "filtered_evergreen": 0,
-            "sources_contribution": {"steam_reviews": 0, "reddit": 0, "youtube": 0}
+            "sources_contribution": {"steam_reviews": 0, "reddit": 0, "youtube": 0},
+            "computed_from": "fallback"
         }
     
     # Blind spots detection

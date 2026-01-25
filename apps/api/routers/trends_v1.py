@@ -499,7 +499,7 @@ async def get_emerging_games(
             tgd.discussions_delta_7d,
             tgd.positive_ratio,
             tgd.tags,
-            f.name,
+            COALESCE(f.name, c.name, NULL) as name,
             f.release_date,
             -- Reddit signals
             MAX(CASE WHEN rs_reddit.source = 'reddit' AND rs_reddit.signal_type = 'reddit_posts_count_7d' THEN rs_reddit.value_numeric END)::int as reddit_posts_count_7d,
@@ -512,6 +512,7 @@ async def get_emerging_games(
         FROM trends_game_daily tgd
         JOIN trends_seed_apps seed ON seed.steam_app_id = tgd.steam_app_id
         LEFT JOIN steam_app_facts f ON f.steam_app_id = tgd.steam_app_id
+        LEFT JOIN steam_app_cache c ON c.steam_app_id = tgd.steam_app_id
         LEFT JOIN trends_raw_signals rs_reddit ON rs_reddit.steam_app_id = tgd.steam_app_id
             AND rs_reddit.source = 'reddit'
             AND DATE(rs_reddit.captured_at) = tgd.day

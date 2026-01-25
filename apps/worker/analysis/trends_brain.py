@@ -446,6 +446,42 @@ class TrendsBrain:
         if not explanation:
             explanation.append("Limited signal data")
         
+        # Brain v3: Compute confidence, stage, signals_used, why_now
+        signals_used = []
+        if reviews_total or reviews_delta_7d or reviews_delta_1d or positive_ratio:
+            signals_used.append("steam_reviews")
+        if reddit_posts_count_7d or reddit_velocity:
+            signals_used.append("reddit")
+        if youtube_videos_count_7d or youtube_velocity:
+            signals_used.append("youtube")
+        
+        confidence_score = self.compute_confidence(
+            signals_used=signals_used,
+            reviews_total=reviews_total,
+            reviews_delta_7d=reviews_delta_7d,
+            positive_ratio=positive_ratio,
+            reddit_velocity=reddit_velocity,
+            youtube_velocity=youtube_velocity
+        )
+        
+        confidence_level = "HIGH" if confidence_score >= 70 else ("MEDIUM" if confidence_score >= 40 else "LOW")
+        
+        stage = self.determine_stage(
+            reviews_delta_7d=reviews_delta_7d,
+            reddit_velocity=reddit_velocity,
+            youtube_velocity=youtube_velocity,
+            signals_used=signals_used,
+            confidence_score=confidence_score
+        )
+        
+        why_now = self.generate_why_now(
+            stage=stage,
+            reviews_delta_7d=reviews_delta_7d,
+            reddit_velocity=reddit_velocity,
+            youtube_velocity=youtube_velocity,
+            signals_used=signals_used
+        )
+        
         return EmergingAnalysis(
             steam_app_id=steam_app_id,
             name=name,
@@ -454,5 +490,10 @@ class TrendsBrain:
             explanation=explanation,
             flags=flags,
             score_components=components,
-            signal_strengths=signal_strengths
+            signal_strengths=signal_strengths,
+            confidence_score=round(confidence_score, 1),
+            confidence_level=confidence_level,
+            stage=stage,
+            why_now=why_now,
+            signals_used=signals_used
         )
