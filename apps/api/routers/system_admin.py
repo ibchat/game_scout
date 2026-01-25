@@ -225,18 +225,37 @@ async def get_system_summary(db: Session = Depends(get_db_session)) -> Dict[str,
         games = emerging_result.get("games", [])
         logger.info(f"get_emerging_games returned {len(games)} games, status={emerging_result.get('status')}")
         
-        # Format games for dashboard (they already have all needed fields from get_emerging_games)
+        # Format games for dashboard and enrich with names from DB
         emerging_top20 = []
         for idx, game in enumerate(games, 1):
             app_id = game.get("steam_app_id")
             if not app_id:
                 continue
             
+            # Get name from DB if not already present
+            game_name = game.get("name")
+            if not game_name:
+                try:
+                    name_result = db.execute(
+                        text("""
+                            SELECT name
+                            FROM steam_app_facts
+                            WHERE steam_app_id = :app_id
+                            LIMIT 1
+                        """),
+                        {"app_id": app_id}
+                    ).scalar()
+                    if name_result:
+                        game_name = name_result
+                except Exception as name_err:
+                    logger.debug(f"Failed to get name for app {app_id}: {name_err}")
+            
             # Format game object with all required fields for dashboard
             formatted = {
                 "rank": idx,
                 "steam_app_id": app_id,
-                "name": game.get("name"),
+                "name": game_name,
+                "steam_url": f"https://store.steampowered.com/app/{app_id}/",
                 "day": game.get("day"),
                 "release_date": game.get("release_date"),
                 "reviews_total": game.get("reviews_total"),
@@ -245,6 +264,9 @@ async def get_system_summary(db: Session = Depends(get_db_session)) -> Dict[str,
                 "reviews_delta_7d": game.get("reviews_delta_7d"),
                 "score": game.get("trend_score", 0),
                 "trend_score": game.get("trend_score", 0),
+                "emerging_score": game.get("emerging_score", game.get("trend_score", 0)),
+                "verdict": game.get("verdict"),
+                "explanation": game.get("explanation", []),
                 "tags": game.get("tags_sample", []),
                 "tags_sample": game.get("tags_sample", []),
                 "why_flagged": game.get("why_flagged", ""),

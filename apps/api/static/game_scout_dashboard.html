@@ -873,12 +873,16 @@
                                       verdict.includes('Weak') ? 'var(--muted)' : 'var(--blue)';
                   const explanation = (g.explanation || []).slice(0, 2).join('; ') || 'N/A';
                   
+                  // Формируем название и ссылку
+                  const steamUrl = g.steam_url || `https://store.steampowered.com/app/${g.steam_app_id}/`;
+                  const displayName = (g.name && g.name.trim()) ? g.name : `App ${g.steam_app_id}`;
+                  
                   return `
                     <tr>
                       <td>${idx + 1}</td>
                       <td>
-                        ${g.name ? `<a href="https://store.steampowered.com/app/${g.steam_app_id}" target="_blank" style="color: var(--blue); text-decoration: none;">${esc(g.name)}</a>` : 'N/A'}
-                        <span style="color: var(--muted); font-size: 11px;"> (#${g.steam_app_id || ''})</span>
+                        <a href="${esc(steamUrl)}" target="_blank" rel="noopener noreferrer" style="color: var(--blue); text-decoration: underline; text-decoration-color: rgba(110,168,255,0.5); transition: text-decoration-color 0.2s;" onmouseover="this.style.textDecorationColor='var(--blue)'" onmouseout="this.style.textDecorationColor='rgba(110,168,255,0.5)'">${esc(displayName)}</a>
+                        <span style="color: var(--muted); font-size: 11px; margin-left: 6px;">(#${g.steam_app_id || ''})</span>
                       </td>
                       <td style="color: ${verdictColor}; font-weight: 600;">${esc(verdict)}</td>
                       <td><strong>${g.emerging_score || g.trend_score || 0}</strong></td>

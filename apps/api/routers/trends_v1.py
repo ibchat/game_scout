@@ -538,18 +538,36 @@ async def get_emerging_games(
             elif isinstance(tags, list):
                 tags_list = tags
         
-        # Полный анализ игры
-        try:
-            analysis = brain.analyze_game(
-                steam_app_id=steam_app_id,
-                name=row["name"],
-                release_date=release_date,
-                reviews_total=reviews_total,
-                reviews_delta_7d=reviews_delta_7d,
-                reviews_delta_1d=reviews_delta_1d,
-                positive_ratio=positive_ratio,
-                tags=tags_list
-            )
+            # Получаем name из БД если не пришёл из запроса
+            game_name = row["name"]
+            if not game_name:
+                try:
+                    name_result = db.execute(
+                        text("""
+                            SELECT name
+                            FROM steam_app_facts
+                            WHERE steam_app_id = :app_id
+                            LIMIT 1
+                        """),
+                        {"app_id": steam_app_id}
+                    ).scalar()
+                    if name_result:
+                        game_name = name_result
+                except Exception as name_err:
+                    logger.debug(f"Failed to get name for app {steam_app_id}: {name_err}")
+            
+            # Полный анализ игры
+            try:
+                analysis = brain.analyze_game(
+                    steam_app_id=steam_app_id,
+                    name=game_name,
+                    release_date=release_date,
+                    reviews_total=reviews_total,
+                    reviews_delta_7d=reviews_delta_7d,
+                    reviews_delta_1d=reviews_delta_1d,
+                    positive_ratio=positive_ratio,
+                    tags=tags_list
+                )
             
             # Исключаем evergreen giants
             if analysis.flags.is_evergreen_giant:
@@ -562,7 +580,8 @@ async def get_emerging_games(
             # Формируем ответ
             game_result = {
                 "steam_app_id": steam_app_id,
-                "name": analysis.name,
+                "name": analysis.name or game_name,  # Используем name из анализа или из БД
+                "steam_url": f"https://store.steampowered.com/app/{steam_app_id}/",
                 "day": row["day"].isoformat() if row["day"] else None,
                 "release_date": release_date.isoformat() if release_date else None,
                 "emerging_score": analysis.emerging_score,
