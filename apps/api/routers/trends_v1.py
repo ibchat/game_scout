@@ -592,7 +592,17 @@ async def get_emerging_games(
             except Exception as name_err:
                 logger.debug(f"Failed to get name for app {steam_app_id}: {name_err}")
         
-        # Полный анализ игры
+        # Reddit signals
+        reddit_posts_count_7d = row.get("reddit_posts_count_7d")
+        reddit_comments_count_7d = row.get("reddit_comments_count_7d")
+        reddit_velocity = row.get("reddit_velocity")
+        
+        # YouTube signals
+        youtube_videos_count_7d = row.get("youtube_videos_count_7d")
+        youtube_views_7d = row.get("youtube_views_7d")
+        youtube_velocity = row.get("youtube_velocity")
+        
+        # Полный анализ игры (мультимодальный)
         try:
             analysis = brain.analyze_game(
                 steam_app_id=steam_app_id,
@@ -602,7 +612,15 @@ async def get_emerging_games(
                 reviews_delta_7d=reviews_delta_7d,
                 reviews_delta_1d=reviews_delta_1d,
                 positive_ratio=positive_ratio,
-                tags=tags_list
+                tags=tags_list,
+                # Reddit signals
+                reddit_posts_count_7d=reddit_posts_count_7d,
+                reddit_comments_count_7d=reddit_comments_count_7d,
+                reddit_velocity=reddit_velocity,
+                # YouTube signals
+                youtube_videos_count_7d=youtube_videos_count_7d,
+                youtube_views_7d=youtube_views_7d,
+                youtube_velocity=youtube_velocity
             )
             
             # Исключаем evergreen giants
