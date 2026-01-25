@@ -488,6 +488,7 @@ async def get_emerging_games(
     today = date.today()
     
     # Get latest daily aggregates for all active seed apps with review data
+    # + Reddit and YouTube signals
     query = text("""
         SELECT 
             tgd.steam_app_id,
@@ -499,14 +500,30 @@ async def get_emerging_games(
             tgd.positive_ratio,
             tgd.tags,
             f.name,
-            f.release_date
+            f.release_date,
+            -- Reddit signals
+            MAX(CASE WHEN rs_reddit.source = 'reddit' AND rs_reddit.signal_type = 'reddit_posts_count_7d' THEN rs_reddit.value_numeric END)::int as reddit_posts_count_7d,
+            MAX(CASE WHEN rs_reddit.source = 'reddit' AND rs_reddit.signal_type = 'reddit_comments_count_7d' THEN rs_reddit.value_numeric END)::int as reddit_comments_count_7d,
+            MAX(CASE WHEN rs_reddit.source = 'reddit' AND rs_reddit.signal_type = 'reddit_velocity' THEN rs_reddit.value_numeric END)::int as reddit_velocity,
+            -- YouTube signals
+            MAX(CASE WHEN rs_yt.source = 'youtube' AND rs_yt.signal_type = 'youtube_videos_count_7d' THEN rs_yt.value_numeric END)::int as youtube_videos_count_7d,
+            MAX(CASE WHEN rs_yt.source = 'youtube' AND rs_yt.signal_type = 'youtube_views_7d' THEN rs_yt.value_numeric END)::int as youtube_views_7d,
+            MAX(CASE WHEN rs_yt.source = 'youtube' AND rs_yt.signal_type = 'youtube_velocity' THEN rs_yt.value_numeric END)::int as youtube_velocity
         FROM trends_game_daily tgd
         JOIN trends_seed_apps seed ON seed.steam_app_id = tgd.steam_app_id
         LEFT JOIN steam_app_facts f ON f.steam_app_id = tgd.steam_app_id
+        LEFT JOIN trends_raw_signals rs_reddit ON rs_reddit.steam_app_id = tgd.steam_app_id
+            AND rs_reddit.source = 'reddit'
+            AND DATE(rs_reddit.captured_at) = tgd.day
+        LEFT JOIN trends_raw_signals rs_yt ON rs_yt.steam_app_id = tgd.steam_app_id
+            AND rs_yt.source = 'youtube'
+            AND DATE(rs_yt.captured_at) = tgd.day
         WHERE seed.is_active = true
           AND tgd.day = (
               SELECT MAX(day) FROM trends_game_daily WHERE steam_app_id = tgd.steam_app_id
           )
+        GROUP BY tgd.steam_app_id, tgd.day, tgd.reviews_total, tgd.reviews_delta_1d, tgd.reviews_delta_7d,
+                 tgd.discussions_delta_7d, tgd.positive_ratio, tgd.tags, f.name, f.release_date
         ORDER BY tgd.steam_app_id
     """)
     

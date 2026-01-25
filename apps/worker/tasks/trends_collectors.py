@@ -659,6 +659,291 @@ def aggregate_daily_trends(db, target_date: Optional[date] = None) -> bool:
         return False
 
 
+def ingest_reddit_signals(db, target_date: Optional[date] = None) -> int:
+    """
+    Ingest Reddit signals into trends_raw_signals.
+    Aggregates posts/comments for games by matching game names in Reddit posts.
+    
+    Returns: number of signals inserted
+    """
+    if target_date is None:
+        target_date = date.today()
+    
+    logger.info(f"trends_ingest_reddit_start date={target_date}")
+    
+    try:
+        # Get all active seed apps with names
+        seed_apps = db.execute(
+            text("""
+                SELECT DISTINCT s.steam_app_id, f.name
+                FROM trends_seed_apps s
+                LEFT JOIN steam_app_facts f ON f.steam_app_id = s.steam_app_id
+                WHERE s.is_active = true
+                  AND f.name IS NOT NULL
+                  AND f.name != ''
+            """)
+        ).mappings().all()
+        
+        if not seed_apps:
+            logger.warning("No seed apps with names found")
+            return 0
+        
+        signals_inserted = 0
+        week_ago = target_date - timedelta(days=7)
+        two_weeks_ago = target_date - timedelta(days=14)
+        
+        for app_row in seed_apps:
+            steam_app_id = app_row["steam_app_id"]
+            game_name = app_row["name"]
+            
+            if not game_name:
+                continue
+            
+            # Search for Reddit posts mentioning this game (last 7 days)
+            # Use simple text matching on title and text
+            reddit_posts = db.execute(
+                text("""
+                    SELECT COUNT(*)::int as posts_count,
+                           SUM(num_comments)::int as comments_count,
+                           SUM(score)::int as total_score
+                    FROM reddit_trend_posts
+                    WHERE collected_at >= :week_ago
+                      AND collected_at < :target_date_end
+                      AND (
+                        LOWER(title) LIKE LOWER(:game_name_pattern)
+                        OR LOWER(text) LIKE LOWER(:game_name_pattern)
+                      )
+                """),
+                {
+                    "week_ago": week_ago,
+                    "target_date_end": target_date + timedelta(days=1),
+                    "game_name_pattern": f"%{game_name}%"
+                }
+            ).mappings().first()
+            
+            if not reddit_posts or reddit_posts["posts_count"] == 0:
+                continue
+            
+            posts_count_7d = reddit_posts["posts_count"] or 0
+            comments_count_7d = reddit_posts["comments_count"] or 0
+            
+            # Calculate velocity: compare with previous week
+            prev_week_posts = db.execute(
+                text("""
+                    SELECT COUNT(*)::int as posts_count
+                    FROM reddit_trend_posts
+                    WHERE collected_at >= :two_weeks_ago
+                      AND collected_at < :week_ago
+                      AND (
+                        LOWER(title) LIKE LOWER(:game_name_pattern)
+                        OR LOWER(text) LIKE LOWER(:game_name_pattern)
+                      )
+                """),
+                {
+                    "two_weeks_ago": two_weeks_ago,
+                    "week_ago": week_ago,
+                    "game_name_pattern": f"%{game_name}%"
+                }
+            ).scalar() or 0
+            
+            reddit_velocity = posts_count_7d - prev_week_posts if prev_week_posts > 0 else posts_count_7d
+            
+            # Insert signals
+            db.execute(
+                text("""
+                    INSERT INTO trends_raw_signals (steam_app_id, source, signal_type, value_numeric, captured_at)
+                    VALUES (:steam_app_id, 'reddit', 'reddit_posts_count_7d', :value, :captured_at)
+                    ON CONFLICT DO NOTHING
+                """),
+                {
+                    "steam_app_id": steam_app_id,
+                    "value": float(posts_count_7d),
+                    "captured_at": datetime.combine(target_date, datetime.min.time())
+                }
+            )
+            signals_inserted += 1
+            
+            db.execute(
+                text("""
+                    INSERT INTO trends_raw_signals (steam_app_id, source, signal_type, value_numeric, captured_at)
+                    VALUES (:steam_app_id, 'reddit', 'reddit_comments_count_7d', :value, :captured_at)
+                    ON CONFLICT DO NOTHING
+                """),
+                {
+                    "steam_app_id": steam_app_id,
+                    "value": float(comments_count_7d),
+                    "captured_at": datetime.combine(target_date, datetime.min.time())
+                }
+            )
+            signals_inserted += 1
+            
+            if reddit_velocity != 0:
+                db.execute(
+                    text("""
+                        INSERT INTO trends_raw_signals (steam_app_id, source, signal_type, value_numeric, captured_at)
+                        VALUES (:steam_app_id, 'reddit', 'reddit_velocity', :value, :captured_at)
+                        ON CONFLICT DO NOTHING
+                    """),
+                    {
+                        "steam_app_id": steam_app_id,
+                        "value": float(reddit_velocity),
+                        "captured_at": datetime.combine(target_date, datetime.min.time())
+                    }
+                )
+                signals_inserted += 1
+        
+        db.commit()
+        logger.info(f"trends_ingest_reddit_done date={target_date} signals_inserted={signals_inserted}")
+        return signals_inserted
+        
+    except Exception as e:
+        logger.error(f"trends_ingest_reddit_fail date={target_date} error={e}", exc_info=True)
+        db.rollback()
+        return 0
+
+
+def ingest_youtube_signals(db, target_date: Optional[date] = None) -> int:
+    """
+    Ingest YouTube signals into trends_raw_signals.
+    Aggregates videos/views for games by matching game names in YouTube video titles/descriptions.
+    
+    Returns: number of signals inserted
+    """
+    if target_date is None:
+        target_date = date.today()
+    
+    logger.info(f"trends_ingest_youtube_start date={target_date}")
+    
+    try:
+        # Get all active seed apps with names
+        seed_apps = db.execute(
+            text("""
+                SELECT DISTINCT s.steam_app_id, f.name
+                FROM trends_seed_apps s
+                LEFT JOIN steam_app_facts f ON f.steam_app_id = s.steam_app_id
+                WHERE s.is_active = true
+                  AND f.name IS NOT NULL
+                  AND f.name != ''
+            """)
+        ).mappings().all()
+        
+        if not seed_apps:
+            logger.warning("No seed apps with names found")
+            return 0
+        
+        signals_inserted = 0
+        week_ago = target_date - timedelta(days=7)
+        two_weeks_ago = target_date - timedelta(days=14)
+        
+        for app_row in seed_apps:
+            steam_app_id = app_row["steam_app_id"]
+            game_name = app_row["name"]
+            
+            if not game_name:
+                continue
+            
+            # Search for YouTube videos mentioning this game (last 7 days)
+            youtube_videos = db.execute(
+                text("""
+                    SELECT COUNT(*)::int as videos_count,
+                           SUM(view_count)::int as views_count,
+                           SUM(like_count)::int as likes_count
+                    FROM youtube_trend_videos
+                    WHERE collected_at >= :week_ago
+                      AND collected_at < :target_date_end
+                      AND (
+                        LOWER(title) LIKE LOWER(:game_name_pattern)
+                        OR LOWER(description) LIKE LOWER(:game_name_pattern)
+                      )
+                """),
+                {
+                    "week_ago": week_ago,
+                    "target_date_end": target_date + timedelta(days=1),
+                    "game_name_pattern": f"%{game_name}%"
+                }
+            ).mappings().first()
+            
+            if not youtube_videos or youtube_videos["videos_count"] == 0:
+                continue
+            
+            videos_count_7d = youtube_videos["videos_count"] or 0
+            views_7d = youtube_videos["views_count"] or 0
+            
+            # Calculate velocity: compare with previous week
+            prev_week_videos = db.execute(
+                text("""
+                    SELECT COUNT(*)::int as videos_count
+                    FROM youtube_trend_videos
+                    WHERE collected_at >= :two_weeks_ago
+                      AND collected_at < :week_ago
+                      AND (
+                        LOWER(title) LIKE LOWER(:game_name_pattern)
+                        OR LOWER(description) LIKE LOWER(:game_name_pattern)
+                      )
+                """),
+                {
+                    "two_weeks_ago": two_weeks_ago,
+                    "week_ago": week_ago,
+                    "game_name_pattern": f"%{game_name}%"
+                }
+            ).scalar() or 0
+            
+            youtube_velocity = videos_count_7d - prev_week_videos if prev_week_videos > 0 else videos_count_7d
+            
+            # Insert signals
+            db.execute(
+                text("""
+                    INSERT INTO trends_raw_signals (steam_app_id, source, signal_type, value_numeric, captured_at)
+                    VALUES (:steam_app_id, 'youtube', 'youtube_videos_count_7d', :value, :captured_at)
+                    ON CONFLICT DO NOTHING
+                """),
+                {
+                    "steam_app_id": steam_app_id,
+                    "value": float(videos_count_7d),
+                    "captured_at": datetime.combine(target_date, datetime.min.time())
+                }
+            )
+            signals_inserted += 1
+            
+            db.execute(
+                text("""
+                    INSERT INTO trends_raw_signals (steam_app_id, source, signal_type, value_numeric, captured_at)
+                    VALUES (:steam_app_id, 'youtube', 'youtube_views_7d', :value, :captured_at)
+                    ON CONFLICT DO NOTHING
+                """),
+                {
+                    "steam_app_id": steam_app_id,
+                    "value": float(views_7d),
+                    "captured_at": datetime.combine(target_date, datetime.min.time())
+                }
+            )
+            signals_inserted += 1
+            
+            if youtube_velocity != 0:
+                db.execute(
+                    text("""
+                        INSERT INTO trends_raw_signals (steam_app_id, source, signal_type, value_numeric, captured_at)
+                        VALUES (:steam_app_id, 'youtube', 'youtube_velocity', :value, :captured_at)
+                        ON CONFLICT DO NOTHING
+                    """),
+                    {
+                        "steam_app_id": steam_app_id,
+                        "value": float(youtube_velocity),
+                        "captured_at": datetime.combine(target_date, datetime.min.time())
+                    }
+                )
+                signals_inserted += 1
+        
+        db.commit()
+        logger.info(f"trends_ingest_youtube_done date={target_date} signals_inserted={signals_inserted}")
+        return signals_inserted
+        
+    except Exception as e:
+        logger.error(f"trends_ingest_youtube_fail date={target_date} error={e}", exc_info=True)
+        db.rollback()
+        return 0
+
+
 if __name__ == "__main__":
     # Standalone runner
     import os

@@ -48,12 +48,20 @@ class ScoreComponents:
     novelty_component: float = 0.0
     penalty_component: float = 0.0
     
+    # Новые компоненты для мультимодального скоринга
+    early_signal_component: float = 0.0  # Reddit/YouTube как early signals
+    confirmation_component: float = 0.0  # Steam как confirmation
+    momentum_component: float = 0.0  # YouTube как momentum
+    
     def total(self) -> float:
         return (
             self.growth_component +
             self.velocity_component +
             self.sentiment_component +
-            self.novelty_component -
+            self.novelty_component +
+            self.early_signal_component +
+            self.confirmation_component +
+            self.momentum_component -
             self.penalty_component
         )
 
