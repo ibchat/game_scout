@@ -468,7 +468,6 @@ async def get_system_summary(
     result["freshness"] = freshness
     
     # Engine v4: Events 24h summary
-    from datetime import datetime, timedelta
     try:
         events_24h = db.execute(
             text("""
