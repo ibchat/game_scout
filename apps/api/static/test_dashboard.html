@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Dashboard</title>
+</head>
+<body>
+    <h1>Test</h1>
+    <script>
+        console.log("Script loaded");
+        function qs(sel) { return document.querySelector(sel); }
+        function qsa(sel) { return Array.from(document.querySelectorAll(sel)); }
+        console.log("Functions defined");
+        
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                console.log("DOM loaded");
+            });
+        } else {
+            console.log("DOM already loaded");
+        }
+    </script>
+</body>
+</html>

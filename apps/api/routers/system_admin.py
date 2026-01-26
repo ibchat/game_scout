@@ -41,8 +41,30 @@ async def get_system_summary(
         db_check = db.execute(text("SELECT 1")).scalar()
         health["database"] = {"status": "ok" if db_check else "error"}
         
-        # Worker health (check if celery is running - simplified)
-        health["worker"] = {"status": "unknown"}  # Would need celery inspect
+        # Worker health (check heartbeat через Redis)
+        try:
+            from apps.worker.tasks.heartbeat import check_heartbeat
+            
+            worker_heartbeat = check_heartbeat("worker")
+            worker_trends_heartbeat = check_heartbeat("worker_trends")
+            
+            health["worker"] = {
+                "status": worker_heartbeat["status"],
+                "last_heartbeat": worker_heartbeat.get("last_heartbeat"),
+                "age_seconds": worker_heartbeat.get("age_seconds"),
+                "reason": worker_heartbeat.get("reason")
+            }
+            
+            health["worker_trends"] = {
+                "status": worker_trends_heartbeat["status"],
+                "last_heartbeat": worker_trends_heartbeat.get("last_heartbeat"),
+                "age_seconds": worker_trends_heartbeat.get("age_seconds"),
+                "reason": worker_trends_heartbeat.get("reason")
+            }
+        except Exception as e:
+            logger.warning(f"Failed to check worker heartbeat: {e}")
+            health["worker"] = {"status": "unknown", "reason": f"Ошибка проверки: {e}"}
+            health["worker_trends"] = {"status": "unknown", "reason": f"Ошибка проверки: {e}"}
         
     except Exception as e:
         health["database"] = {"status": "error", "error": str(e)}
@@ -60,8 +82,61 @@ async def get_system_summary(
             text("SELECT COUNT(*)::int FROM trends_seed_apps WHERE is_active = true")
         ).scalar() or 0
         trends_today["seed_apps"] = seed_count
+        trends_today["seed_total"] = seed_count  # Для совместимости
     except:
         trends_today["seed_apps"] = 0
+        trends_today["seed_total"] = 0
+    
+    # Pipeline metrics (2.2: метрики обновлений)
+    try:
+        # Daily updated today (сколько игр обновлено в trends_game_daily сегодня)
+        daily_updated = db.execute(
+            text("""
+                SELECT COUNT(DISTINCT steam_app_id)::int
+                FROM trends_game_daily
+                WHERE day = :today
+            """),
+            {"today": today}
+        ).scalar() or 0
+        trends_today["daily_updated_today"] = daily_updated
+        
+        # Reviews updated today (сколько игр обновлено в steam_review_daily сегодня)
+        reviews_updated = db.execute(
+            text("""
+                SELECT COUNT(DISTINCT steam_app_id)::int
+                FROM steam_review_daily
+                WHERE day = :today
+            """),
+            {"today": today}
+        ).scalar() or 0
+        trends_today["reviews_updated_today"] = reviews_updated
+        
+        # Errors today (ошибки в trend_jobs за сегодня)
+        errors_today = db.execute(
+            text("""
+                SELECT COUNT(*)::int
+                FROM trend_jobs
+                WHERE status = 'failed'
+                  AND DATE(updated_at) = :today
+            """),
+            {"today": today}
+        ).scalar() or 0
+        trends_today["errors_today"] = errors_today
+        
+        # Coverage (процент обновленных игр)
+        if seed_count > 0:
+            trends_today["coverage_daily_pct"] = round((daily_updated / seed_count) * 100, 1)
+            trends_today["coverage_reviews_pct"] = round((reviews_updated / seed_count) * 100, 1)
+        else:
+            trends_today["coverage_daily_pct"] = 0.0
+            trends_today["coverage_reviews_pct"] = 0.0
+    except Exception as e:
+        logger.warning(f"Failed to compute pipeline metrics: {e}")
+        trends_today["daily_updated_today"] = 0
+        trends_today["reviews_updated_today"] = 0
+        trends_today["errors_today"] = 0
+        trends_today["coverage_daily_pct"] = 0.0
+        trends_today["coverage_reviews_pct"] = 0.0
     
     # Jobs count
     try:
@@ -124,304 +199,170 @@ async def get_system_summary(
         trends_today["emerging_count"] = 0
         logger.warning(f"Failed to get emerging count: {e}")
     
-    # Signals coverage and freshness - ТОЛЬКО реальные источники из trends_raw_signals
+    # Signals coverage - ТОЛЬКО реальные источники: steam_review_daily
     signals_coverage = {}
     signals_freshness = {}
     
     try:
         today = date.today()
-        week_ago = today - timedelta(days=7)
-    
-    # Total seed apps
         total_seed_apps = trends_today.get("seed_apps", 0)
     
-    # Получаем реальные источники из БД
-        real_sources = db.execute(
-            text("""
-                SELECT DISTINCT source
-                FROM trends_raw_signals
-                WHERE source IS NOT NULL
-                ORDER BY source
-            """)
-        ).scalars().all()
-    
-    # Steam Reviews coverage - считаем за 24 часа для актуальности
-        if 'steam_reviews' in real_sources:
-            steam_stats = db.execute(
-                text("""
-                    SELECT 
-                        COUNT(DISTINCT steam_app_id)::int as games_with_signals,
-                        COUNT(*)::int as signals_total,
-                        MAX(captured_at) as last_captured_at
-                    FROM trends_raw_signals
-                    WHERE captured_at >= now() - interval '24 hours'
-                      AND source = 'steam_reviews'
-                      AND value_numeric IS NOT NULL
-                """)
-            ).mappings().first()
-            
-            games_with_steam = steam_stats["games_with_signals"] if steam_stats else 0
-            signals_total_steam = steam_stats["signals_total"] if steam_stats else 0
-            steam_last_captured = steam_stats["last_captured_at"] if steam_stats else None
-            
-            signals_coverage["steam_reviews"] = {
-                "apps_with_signals": games_with_steam,
-                "signals_total": signals_total_steam,
-                "total_apps": total_seed_apps,
-                "pct": round((games_with_steam / total_seed_apps * 100) if total_seed_apps > 0 else 0, 1),
-                "active": games_with_steam > 0
-            }
-            signals_freshness["steam_reviews"] = {
-                "last_captured_at": steam_last_captured.isoformat() if steam_last_captured else None,
-                "age_minutes": int((datetime.now() - steam_last_captured.replace(tzinfo=None)).total_seconds() / 60) if steam_last_captured else None
-            }
-        else:
-            signals_coverage["steam_reviews"] = {"apps_with_signals": 0, "signals_total": 0, "total_apps": 0, "pct": 0, "active": False}
-            signals_freshness["steam_reviews"] = {"last_captured_at": None, "age_minutes": None}
-    
-    # Steam Store coverage - считаем за 24 часа
-        if 'steam_store' in real_sources:
-            store_stats = db.execute(
-                text("""
-                    SELECT 
-                        COUNT(DISTINCT steam_app_id)::int as games_with_signals,
-                        COUNT(*)::int as signals_total,
-                        MAX(captured_at) as last_captured_at
-                    FROM trends_raw_signals
-                    WHERE captured_at >= now() - interval '24 hours'
-                      AND source = 'steam_store'
-                      AND value_numeric IS NOT NULL
-                """)
-            ).mappings().first()
-            
-            games_with_store = store_stats["games_with_signals"] if store_stats else 0
-            signals_total_store = store_stats["signals_total"] if store_stats else 0
-            store_last_captured = store_stats["last_captured_at"] if store_stats else None
-            
-            signals_coverage["steam_store"] = {
-                "apps_with_signals": games_with_store,
-                "signals_total": signals_total_store,
-                "total_apps": total_seed_apps,
-                "pct": round((games_with_store / total_seed_apps * 100) if total_seed_apps > 0 else 0, 1),
-                "active": games_with_store > 0
-            }
-            signals_freshness["steam_store"] = {
-                "last_captured_at": store_last_captured.isoformat() if store_last_captured else None,
-                "age_minutes": int((datetime.now() - store_last_captured.replace(tzinfo=None)).total_seconds() / 60) if store_last_captured and hasattr(store_last_captured, 'replace') else None
-            }
-        else:
-            signals_coverage["steam_store"] = {"apps_with_signals": 0, "signals_total": 0, "total_apps": 0, "pct": 0, "active": False}
-            signals_freshness["steam_store"] = {"last_captured_at": None, "age_minutes": None}
-    
-    # Reddit - проверяем наличие, но не считаем активным если нет данных
-        reddit_stats = db.execute(
+        # Steam Reviews coverage - из steam_review_daily (единственный реальный источник)
+        steam_stats = db.execute(
             text("""
                 SELECT 
-                    COUNT(DISTINCT steam_app_id)::int as games_with_signals,
-                    COUNT(*)::int as signals_total,
-                    MAX(captured_at) as last_captured_at
-                FROM trends_raw_signals
-                WHERE captured_at >= now() - interval '24 hours'
-                  AND source = 'reddit'
-                  AND value_numeric IS NOT NULL
-            """)
+                    COUNT(DISTINCT steam_app_id)::int as games_with_data,
+                    COUNT(*)::int as total_records,
+                    MAX(computed_at) as last_computed_at
+                FROM steam_review_daily
+                WHERE day >= :today - interval '7 days'
+                  AND all_reviews_count IS NOT NULL
+            """),
+            {"today": today}
         ).mappings().first()
-    
-        games_with_reddit = reddit_stats["games_with_signals"] if reddit_stats else 0
-        signals_total_reddit = reddit_stats["signals_total"] if reddit_stats else 0
-        reddit_last_captured = reddit_stats["last_captured_at"] if reddit_stats else None
-    
-        signals_coverage["reddit"] = {
-            "apps_with_signals": games_with_reddit,
-            "signals_total": signals_total_reddit,
+        
+        games_with_steam = steam_stats["games_with_data"] if steam_stats else 0
+        steam_last_computed = steam_stats["last_computed_at"] if steam_stats else None
+        
+        signals_coverage["steam_reviews"] = {
+            "apps_with_signals": games_with_steam,
+            "signals_total": steam_stats["total_records"] if steam_stats else 0,
             "total_apps": total_seed_apps,
-            "pct": round((games_with_reddit / total_seed_apps * 100) if total_seed_apps > 0 else 0, 1),
-            "active": games_with_reddit > 0
+            "pct": round((games_with_steam / total_seed_apps * 100) if total_seed_apps > 0 else 0, 1),
+            "active": games_with_steam > 0,
+            "source": "steam_review_daily"
         }
-        signals_freshness["reddit"] = {
-            "last_captured_at": reddit_last_captured.isoformat() if reddit_last_captured else None,
-            "age_minutes": int((datetime.now() - reddit_last_captured.replace(tzinfo=None)).total_seconds() / 60) if reddit_last_captured and hasattr(reddit_last_captured, 'replace') else None
+        signals_freshness["steam_reviews"] = {
+            "last_captured_at": steam_last_computed.isoformat() if steam_last_computed else None,
+            "age_minutes": int((datetime.now() - steam_last_computed.replace(tzinfo=None)).total_seconds() / 60) if steam_last_computed and hasattr(steam_last_computed, 'replace') else None
         }
-    
-    # YouTube - проверяем наличие, но не считаем активным если нет данных
-        youtube_stats = db.execute(
-            text("""
-                SELECT 
-                    COUNT(DISTINCT steam_app_id)::int as games_with_signals,
-                    COUNT(*)::int as signals_total,
-                    MAX(captured_at) as last_captured_at
-                FROM trends_raw_signals
-                WHERE captured_at >= now() - interval '24 hours'
-                  AND source = 'youtube'
-                  AND value_numeric IS NOT NULL
-            """)
-        ).mappings().first()
-    
-        games_with_youtube = youtube_stats["games_with_signals"] if youtube_stats else 0
-        signals_total_youtube = youtube_stats["signals_total"] if youtube_stats else 0
-        youtube_last_captured = youtube_stats["last_captured_at"] if youtube_stats else None
-    
+        
+        # Reddit / YouTube - не участвуют (нет данных)
+        signals_coverage["reddit"] = {
+            "apps_with_signals": 0,
+            "signals_total": 0,
+            "total_apps": total_seed_apps,
+            "pct": 0,
+            "active": False,
+            "source": "не используется"
+        }
+        signals_freshness["reddit"] = {"last_captured_at": None, "age_minutes": None}
+        
         signals_coverage["youtube"] = {
-        "apps_with_signals": games_with_youtube,
-        "signals_total": signals_total_youtube,
-        "total_apps": total_seed_apps,
-        "pct": round((games_with_youtube / total_seed_apps * 100) if total_seed_apps > 0 else 0, 1),
-        "active": games_with_youtube > 0
+            "apps_with_signals": 0,
+            "signals_total": 0,
+            "total_apps": total_seed_apps,
+            "pct": 0,
+            "active": False,
+            "source": "не используется"
         }
-        signals_freshness["youtube"] = {
-        "last_captured_at": youtube_last_captured.isoformat() if youtube_last_captured else None,
-        "age_minutes": int((datetime.now() - youtube_last_captured.replace(tzinfo=None)).total_seconds() / 60) if youtube_last_captured and hasattr(youtube_last_captured, 'replace') else None
-        }
+        signals_freshness["youtube"] = {"last_captured_at": None, "age_minutes": None}
+        
+        # Numeric signals summary - из steam_review_daily
+        try:
+            signals_numeric_enriched = [
+                {
+                    "signal_type": "all_reviews_count",
+                    "rows": games_with_steam,
+                    "numeric_rows": games_with_steam,
+                    "source": "Steam",
+                    "usage": "Emerging, Evergreen filter",
+                    "purpose": "Масштаб игры"
+                },
+                {
+                    "signal_type": "recent_reviews_count_30d",
+                    "rows": games_with_steam,
+                    "numeric_rows": games_with_steam,
+                    "source": "Steam",
+                    "usage": "Emerging score",
+                    "purpose": "Скорость роста"
+                },
+                {
+                    "signal_type": "all_positive_percent",
+                    "rows": games_with_steam,
+                    "numeric_rows": games_with_steam,
+                    "source": "Steam",
+                    "usage": "Quality filter",
+                    "purpose": "Качество аудитории"
+                }
+            ]
+            trends_today["signals_numeric"] = signals_numeric_enriched
+        except Exception:
+            trends_today["signals_numeric"] = []
     
     except Exception as e:
         logger.error(f"Failed to compute signals coverage: {e}", exc_info=True)
         signals_coverage = {
-            "steam_reviews": {"apps_with_signals": 0, "signals_total": 0, "total_apps": 0, "pct": 0, "active": False},
-            "steam_store": {"apps_with_signals": 0, "signals_total": 0, "total_apps": 0, "pct": 0, "active": False},
-            "reddit": {"apps_with_signals": 0, "signals_total": 0, "total_apps": 0, "pct": 0, "active": False},
-            "youtube": {"apps_with_signals": 0, "signals_total": 0, "total_apps": 0, "pct": 0, "active": False}
+            "steam_reviews": {"apps_with_signals": 0, "signals_total": 0, "total_apps": 0, "pct": 0, "active": False, "source": "steam_review_daily"},
+            "reddit": {"apps_with_signals": 0, "signals_total": 0, "total_apps": 0, "pct": 0, "active": False, "source": "не используется"},
+            "youtube": {"apps_with_signals": 0, "signals_total": 0, "total_apps": 0, "pct": 0, "active": False, "source": "не используется"}
         }
         signals_freshness = {
             "steam_reviews": {"last_captured_at": None, "age_minutes": None},
-            "steam_store": {"last_captured_at": None, "age_minutes": None},
             "reddit": {"last_captured_at": None, "age_minutes": None},
             "youtube": {"last_captured_at": None, "age_minutes": None}
         }
-    
-    # Numeric signals summary
-    try:
-        signals = db.execute(
-            text("""
-                SELECT 
-                    signal_type,
-                    COUNT(*)::int as rows,
-                    COUNT(CASE WHEN value_numeric IS NOT NULL THEN 1 END)::int as numeric_rows
-                FROM trends_raw_signals
-                WHERE DATE(captured_at) = :today
-                GROUP BY signal_type
-                ORDER BY signal_type
-            """),
-            {"today": today}
-        ).mappings().all()
-        
-        # Map signal types to sources and usage
-        signal_mapping = {
-            "all_reviews_count": {"source": "Steam", "usage": "Emerging, Evergreen filter", "purpose": "Масштаб игры"},
-            "recent_reviews_count_30d": {"source": "Steam", "usage": "Emerging score", "purpose": "Скорость роста"},
-            "all_positive_ratio": {"source": "Steam", "usage": "Quality filter", "purpose": "Качество аудитории"},
-            "reviews_delta_7d": {"source": "Steam", "usage": "Emerging score", "purpose": "Рост за неделю"},
-            "reviews_delta_1d": {"source": "Steam", "usage": "Emerging score", "purpose": "Рост за день"},
-        }
-        
-        # Обогащаем сигналы информацией об источнике из trends_raw_signals
-        signals_numeric_enriched = []
-        for s in signals:
-            # Получаем source для этого signal_type из trends_raw_signals
-            source_info = db.execute(
-                text("""
-                    SELECT DISTINCT source
-                    FROM trends_raw_signals
-                    WHERE signal_type = :signal_type
-                      AND captured_at::date = :today
-                    LIMIT 1
-                """),
-                {"signal_type": s["signal_type"], "today": today}
-            ).scalar()
-            
-            signals_numeric_enriched.append({
-                "signal_type": s["signal_type"],
-                "rows": s["rows"],
-                "numeric_rows": s["numeric_rows"],
-                "source": source_info or signal_mapping.get(s["signal_type"], {}).get("source", "Unknown"),
-                "usage": signal_mapping.get(s["signal_type"], {}).get("usage", "Не используется"),
-                "purpose": signal_mapping.get(s["signal_type"], {}).get("purpose", "Не определено")
-            })
-        
-        trends_today["signals_numeric"] = signals_numeric_enriched
-    except Exception:
         trends_today["signals_numeric"] = []
     
     trends_today["signals_coverage"] = signals_coverage
     trends_today["signals_freshness"] = signals_freshness
     
-    # Emerging influence analysis (based on actual brain components)
+    # Emerging influence analysis - только Steam Reviews
     try:
-        # Use emerging_count from trends_today (already computed)
         emerging_count = trends_today.get("emerging_count", 0)
         
-        # Count filtered evergreen giants (will be computed later in diagnostics)
-        filtered_evergreen = 0  # Will be set from diagnostics
-        
-        # Calculate source influence - ТОЛЬКО реальные источники
-        steam_reviews_pct = signals_coverage.get("steam_reviews", {}).get("pct", 0) if signals_coverage.get("steam_reviews", {}).get("active", False) else 0
-        steam_store_pct = signals_coverage.get("steam_store", {}).get("pct", 0) if signals_coverage.get("steam_store", {}).get("active", False) else 0
-        reddit_pct = signals_coverage.get("reddit", {}).get("pct", 0) if signals_coverage.get("reddit", {}).get("active", False) else 0
-        youtube_pct = signals_coverage.get("youtube", {}).get("pct", 0) if signals_coverage.get("youtube", {}).get("active", False) else 0
-        
-        # Analyze which sources contribute to emerging
-        sources_contribution = {
-            "steam_reviews": steam_reviews_pct,
-            "steam_store": steam_store_pct
-        }
-        
-        # Добавляем только активные источники
-        if reddit_pct > 0:
-            sources_contribution["reddit"] = reddit_pct
-        if youtube_pct > 0:
-            sources_contribution["youtube"] = youtube_pct
+        # Получаем filtered_evergreen из diagnostics (если доступен)
+        filtered_evergreen = 0
         
         emerging_influence = {
             "games_found": emerging_count,
             "filtered_evergreen": filtered_evergreen,
-            "sources_contribution": sources_contribution,
-            "computed_from": "signals_coverage"
+            "sources_contribution": {
+                "steam_reviews": signals_coverage.get("steam_reviews", {}).get("pct", 0)
+            },
+            "computed_from": "steam_review_daily"
         }
         trends_today["emerging_influence"] = emerging_influence
     except Exception:
         trends_today["emerging_influence"] = {
             "games_found": 0,
             "filtered_evergreen": 0,
-            "sources_contribution": {"steam_reviews": 0, "reddit": 0, "youtube": 0},
+            "sources_contribution": {"steam_reviews": 0},
             "computed_from": "fallback"
         }
     
-    # Blind spots detection (based on actual data)
+    # Blind spots detection - честно показываем, что не используется
     blind_spots = []
     try:
-        # Check Reddit participation - только если есть в БД
-        reddit_coverage = signals_coverage.get("reddit", {})
-        if not reddit_coverage.get("active", False):
-            blind_spots.append({
-                "message": "Reddit подключён, но не участвует в scoring (нет данных в trends_raw_signals)",
-                "severity": "medium"
-            })
+        # Reddit / YouTube не участвуют (Engine v4 Final: только Steam)
+        blind_spots.append({
+            "message": "Reddit не используется в Emerging Engine v4 (только Steam Reviews)",
+            "severity": "info"
+        })
+        blind_spots.append({
+            "message": "YouTube не используется в Emerging Engine v4 (только Steam Reviews)",
+            "severity": "info"
+        })
         
-        # Check YouTube participation
-        youtube_coverage = signals_coverage.get("youtube", {})
-        if not youtube_coverage.get("active", False):
-            blind_spots.append({
-                "message": "YouTube подключён, но не участвует в scoring (нет данных в trends_raw_signals)",
-                "severity": "medium"
-            })
-        
-        # Check for missing temporal deltas
-        missing_deltas = db.execute(
+        # Check for missing Steam data
+        missing_steam_data = db.execute(
             text("""
                 SELECT COUNT(DISTINCT s.steam_app_id)::int
                 FROM trends_seed_apps s
-                LEFT JOIN trends_game_daily g ON g.steam_app_id = s.steam_app_id
-                  AND g.day >= :week_ago
+                LEFT JOIN steam_review_daily srd ON srd.steam_app_id = s.steam_app_id
+                  AND srd.day = (
+                      SELECT MAX(day) FROM steam_review_daily WHERE steam_app_id = s.steam_app_id
+                  )
                 WHERE s.is_active = true
-                  AND g.reviews_delta_7d IS NULL
-            """),
-            {"week_ago": week_ago}
+                  AND srd.all_reviews_count IS NULL
+            """)
         ).scalar() or 0
         
-        if missing_deltas > 0:
-            pct = round((missing_deltas / total_seed_apps * 100) if total_seed_apps > 0 else 0, 1)
+        if missing_steam_data > 0:
+            pct = round((missing_steam_data / total_seed_apps * 100) if total_seed_apps > 0 else 0, 1)
             blind_spots.append({
-                "message": f"Нет временных дельт >7 дней для {pct}% игр",
-                "severity": "low"
+                "message": f"Нет данных Steam Reviews для {pct}% seed-игр",
+                "severity": "medium"
             })
     except Exception:
         pass
@@ -590,26 +531,57 @@ async def get_system_summary(
                 continue
             
             # Форматируем для dashboard с минимальными полями
+            # Lifecycle Intelligence v5: простые fallback значения
+            reviews_delta_7d = game.get("reviews_delta_7d", 0)
+            reviews_total = game.get("reviews_total", 0)
+            lifecycle_stage = "MATURITY"  # По умолчанию
+            if reviews_total < 100:
+                lifecycle_stage = "SOFT_LAUNCH"
+            elif reviews_delta_7d > 0 and reviews_total < 1000:
+                lifecycle_stage = "BREAKOUT"
+            elif reviews_delta_7d > 0:
+                lifecycle_stage = "GROWTH"
+            
+            growth_type = "ORGANIC"  # По умолчанию
+            
             formatted = {
                 "rank": game.get("rank", 0),
                 "steam_app_id": app_id,
                 "name": game.get("game_name") or game.get("name") or f"App #{app_id}",
                 "game_name": game.get("game_name") or game.get("name") or f"App #{app_id}",
                 "steam_url": game.get("steam_url") or f"https://store.steampowered.com/app/{app_id}/",
-                "reviews_total": game.get("reviews_total"),
+                "reviews_total": reviews_total,
                 "positive_ratio": game.get("positive_ratio"),
-                "reviews_delta_7d": game.get("reviews_delta_7d"),
+                "reviews_delta_7d": reviews_delta_7d,
                 "score": game.get("emerging_score", 0),
                 "trend_score": game.get("emerging_score", 0),
                 "emerging_score": game.get("emerging_score", 0),
-                "verdict": "Weak signal",  # Простой fallback
+                "verdict": "Слабый сигнал",  # На русском
                 "confidence_score": 50,  # Простой fallback
-                "confidence_level": "MEDIUM",  # Простой fallback
-                "stage": "CONFIRMING",  # Простой fallback
-                "why_now": f"Рост отзывов на {game.get('reviews_delta_7d', 0)} за 7 дней",
+                "confidence_level": "Средняя",  # На русском
+                "confidence_level_raw": "MEDIUM",  # Для фильтрации
+                "stage": "Подтверждение",  # На русском
+                "stage_raw": "CONFIRMING",  # Для фильтрации
+                "why_now": f"Рост отзывов на {reviews_delta_7d} за 7 дней",
                 "signals_used": ["steam_reviews"],
                 "evidence": [],  # Пустой массив для упрощения
-                "score_components": {}  # Пустой объект для упрощения
+                "score_components": {},  # Пустой объект для упрощения
+                # Lifecycle Intelligence v5
+                "lifecycle_stage": "Зрелость" if lifecycle_stage == "MATURITY" else ("Прорыв" if lifecycle_stage == "BREAKOUT" else ("Рост" if lifecycle_stage == "GROWTH" else "Мягкий запуск")),
+                "lifecycle_stage_raw": lifecycle_stage,
+                # Anti-Hype Layer v5
+                "growth_type": "Органический",
+                "growth_type_raw": growth_type,
+                # WHY NOW v2 (упрощённый)
+                "why_now_v2": {
+                    "основной_триггер": f"Рост отзывов: +{reviews_delta_7d} за 7 дней",
+                    "дополнительные_факторы": [],
+                    "аномалия": "",
+                    "риски": "Упрощённый анализ (полный анализ доступен в /trends/games/emerging)",
+                    "инвестиционное_окно_дней": 14
+                },
+                # Confidence как фактор ранжирования
+                "final_rank_score": game.get("emerging_score", 0) * 0.5  # Упрощённый расчёт
             }
             emerging_top20.append(formatted)
         
@@ -699,6 +671,120 @@ async def trigger_system_action(
         except Exception as e:
             logger.error(f"Ingest action failed: {e}", exc_info=True)
             return {"ok": False, "message": f"Ingest failed: {e}", "details": {"error": str(e)}}
+    
+    elif action == "ingest_reddit":
+        try:
+            from apps.worker.tasks.trends_collectors import ingest_reddit_signals
+            signals_count = ingest_reddit_signals(db, target_date=date.today())
+            return {"ok": True, "message": "Reddit signals ingested", "details": {"signals_inserted": signals_count}}
+        except Exception as e:
+            logger.error(f"Ingest Reddit failed: {e}", exc_info=True)
+            return {"ok": False, "message": f"Ingest Reddit failed: {e}", "details": {"error": str(e)}}
+    
+    elif action == "ingest_youtube":
+        try:
+            from apps.worker.tasks.trends_collectors import ingest_youtube_signals
+            signals_count = ingest_youtube_signals(db, target_date=date.today())
+            return {"ok": True, "message": "YouTube signals ingested", "details": {"signals_inserted": signals_count}}
+        except Exception as e:
+            logger.error(f"Ingest YouTube failed: {e}", exc_info=True)
+            return {"ok": False, "message": f"Ingest YouTube failed: {e}", "details": {"error": str(e)}}
+    
+    elif action == "collect_reddit":
+        try:
+            # Используем новый пайплайн: collect_reddit_events (сохраняет в trends_raw_events)
+            from apps.worker.tasks.collect_reddit_events import collect_reddit_events_task
+            # Запускаем через Celery
+            task = collect_reddit_events_task.delay(query_set='indie_radar', max_per_query=50)
+            return {"ok": True, "message": "Reddit events collection started", "details": {"task_id": task.id}}
+        except Exception as e:
+            logger.error(f"Collect Reddit events failed: {e}", exc_info=True)
+            return {"ok": False, "message": f"Collect Reddit events failed: {e}", "details": {"error": str(e)}}
+    
+    elif action == "collect_youtube":
+        try:
+            # Используем новый пайплайн: collect_youtube_events (сохраняет в trends_raw_events)
+            from apps.worker.tasks.collect_youtube_events import collect_youtube_events_task
+            # Запускаем через Celery
+            task = collect_youtube_events_task.delay(query_set='indie_radar', max_per_query=25)
+            return {"ok": True, "message": "YouTube events collection started", "details": {"task_id": task.id}}
+        except Exception as e:
+            logger.error(f"Collect YouTube events failed: {e}", exc_info=True)
+            return {"ok": False, "message": f"Collect YouTube events failed: {e}", "details": {"error": str(e)}}
+    
+    elif action == "run_daily_refresh":
+        # 2.1: Admin action для обновления reviews / daily aggregates по seed apps батчами
+        try:
+            from apps.api.routers.trends_v1 import enqueue_trends_jobs, aggregate_trends_daily
+            
+            # Получаем параметры
+            batch_size = request_body.get("batch_size", 100)
+            limit_apps = request_body.get("limit_apps", None)  # None = все seed apps
+            
+            # 1. Enqueue jobs для обновления reviews и appdetails
+            seed_apps_query = text("""
+                SELECT steam_app_id
+                FROM trends_seed_apps
+                WHERE is_active = true
+                ORDER BY steam_app_id
+            """)
+            
+            if limit_apps:
+                seed_apps_query = text(f"""
+                    SELECT steam_app_id
+                    FROM trends_seed_apps
+                    WHERE is_active = true
+                    ORDER BY steam_app_id
+                    LIMIT {limit_apps}
+                """)
+            
+            seed_apps = db.execute(seed_apps_query).scalars().all()
+            total_apps = len(seed_apps)
+            
+            # Разбиваем на батчи
+            batches = []
+            for i in range(0, total_apps, batch_size):
+                batch = seed_apps[i:i + batch_size]
+                batches.append([app_id for app_id in batch])
+            
+            logger.info(f"run_daily_refresh: {total_apps} apps, {len(batches)} batches")
+            
+            # Enqueue jobs для каждого батча
+            total_enqueued = 0
+            for batch_idx, batch in enumerate(batches):
+                try:
+                    enqueue_result = await enqueue_trends_jobs(
+                        steam_app_ids=batch,
+                        job_types=["reviews_daily", "appdetails"],
+                        db=db
+                    )
+                    batch_enqueued = sum(enqueue_result.enqueued.values())
+                    total_enqueued += batch_enqueued
+                    logger.info(f"run_daily_refresh: batch {batch_idx + 1}/{len(batches)}: {batch_enqueued} jobs enqueued")
+                except Exception as e:
+                    logger.error(f"run_daily_refresh: batch {batch_idx + 1} failed: {e}")
+            
+            # 2. Запускаем агрегацию (опционально, можно запустить отдельно)
+            aggregate_result = None
+            if request_body.get("run_aggregation", True):
+                try:
+                    aggregate_result = await aggregate_trends_daily(days_back=7, db=db)
+                except Exception as e:
+                    logger.warning(f"run_daily_refresh: aggregation failed: {e}")
+            
+            return {
+                "ok": True,
+                "message": f"Daily refresh started: {total_enqueued} jobs enqueued for {total_apps} apps",
+                "details": {
+                    "total_apps": total_apps,
+                    "batches": len(batches),
+                    "jobs_enqueued": total_enqueued,
+                    "aggregation": aggregate_result
+                }
+            }
+        except Exception as e:
+            logger.error(f"run_daily_refresh failed: {e}", exc_info=True)
+            return {"ok": False, "message": f"Daily refresh failed: {e}", "details": {"error": str(e)}}
     
     elif action == "aggregate":
         try:

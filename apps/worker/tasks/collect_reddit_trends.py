@@ -1,6 +1,5 @@
 from apps.worker.celery_app import celery_app
 from apps.db.session import get_db_session
-from apps.db.models_youtube import RedditTrendPost
 from sqlalchemy import text
 import logging
 
@@ -33,30 +32,51 @@ def collect_reddit_trends_task(query_set='indie_radar', max_per_query=50):
         for query in queries:
             posts = scraper.search_posts(query, limit=max_per_query)
             
+            # Используем raw SQL для избежания проблем с моделями SQLAlchemy
             for post_data in posts:
-                # ИСПРАВЛЕНИЕ: Проверить существует ли пост
-                existing = db.query(RedditTrendPost).filter_by(post_id=post_data['post_id']).first()
+                # Проверить существует ли пост через raw SQL
+                existing = db.execute(
+                    text("SELECT id FROM reddit_trend_posts WHERE post_id = :post_id"),
+                    {"post_id": post_data['post_id']}
+                ).scalar()
                 
                 if existing:
                     # Обновить query/query_set если нужно
-                    existing.query = query
-                    existing.query_set = query_set
-                else:
-                    # Создать новый
-                    post = RedditTrendPost(
-                        post_id=post_data['post_id'],
-                        title=post_data['title'],
-                        url=post_data['url'],
-                        subreddit=post_data['subreddit'],
-                        author=post_data['author'],
-                        score=post_data['score'],
-                        num_comments=post_data['num_comments'],
-                        upvote_ratio=post_data['upvote_ratio'],
-                        text=post_data['text'],
-                        query=query,
-                        query_set=query_set
+                    db.execute(
+                        text("""
+                            UPDATE reddit_trend_posts 
+                            SET query = :query, query_set = :query_set
+                            WHERE post_id = :post_id
+                        """),
+                        {
+                            "post_id": post_data['post_id'],
+                            "query": query,
+                            "query_set": query_set
+                        }
                     )
-                    db.add(post)
+                else:
+                    # Создать новый через raw SQL
+                    db.execute(
+                        text("""
+                            INSERT INTO reddit_trend_posts 
+                            (post_id, title, url, subreddit, author, score, num_comments, upvote_ratio, text, query, query_set, collected_at)
+                            VALUES 
+                            (:post_id, :title, :url, :subreddit, :author, :score, :num_comments, :upvote_ratio, :text, :query, :query_set, NOW())
+                        """),
+                        {
+                            "post_id": post_data['post_id'],
+                            "title": post_data.get('title', '')[:1000],
+                            "url": post_data.get('url', '')[:500],
+                            "subreddit": post_data.get('subreddit', '')[:100],
+                            "author": post_data.get('author', '')[:200],
+                            "score": post_data.get('score', 0),
+                            "num_comments": post_data.get('num_comments', 0),
+                            "upvote_ratio": post_data.get('upvote_ratio', 0.0),
+                            "text": (post_data.get('text', '') or '')[:5000],
+                            "query": query,
+                            "query_set": query_set
+                        }
+                    )
             
             db.commit()
             total += len(posts)

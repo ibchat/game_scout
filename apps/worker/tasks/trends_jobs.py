@@ -7,10 +7,12 @@ import time
 import logging
 import requests
 import json
+import threading
 from typing import Optional, Dict, Any
 from datetime import datetime, date
 from sqlalchemy import text
 from apps.db.session import get_db_session
+from apps.worker.tasks.heartbeat import start_heartbeat_loop
 
 logger = logging.getLogger(__name__)
 
@@ -389,6 +391,15 @@ def process_trend_jobs_loop(max_iterations: Optional[int] = None, sleep_seconds:
     Continuous loop to process trend_jobs.
     Stops when no jobs remain or max_iterations reached.
     """
+    # Запускаем heartbeat в отдельном потоке
+    heartbeat_thread = threading.Thread(
+        target=start_heartbeat_loop,
+        args=("worker_trends",),
+        daemon=True
+    )
+    heartbeat_thread.start()
+    logger.info("Heartbeat thread started for worker_trends")
+    
     iteration = 0
     
     while True:

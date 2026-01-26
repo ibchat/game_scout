@@ -19,6 +19,55 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/trends", tags=["Trends Scout"])
 
 # ============================================================
+# Translation helpers (Lifecycle Intelligence v5)
+# ============================================================
+
+def translate_stage_to_russian(stage: str) -> str:
+    """Переводит stage на русский язык"""
+    mapping = {
+        "EARLY": "Ранний интерес",
+        "CONFIRMING": "Подтверждение",
+        "BREAKOUT": "Прорыв",
+        "FADING": "Затухание",
+        "NOISE": "Шум",
+        "MOMENTUM": "Импульс"
+    }
+    return mapping.get(stage, stage)
+
+def translate_confidence_level_to_russian(level: str) -> str:
+    """Переводит confidence_level на русский язык"""
+    mapping = {
+        "LOW": "Низкая",
+        "MEDIUM": "Средняя",
+        "HIGH": "Высокая"
+    }
+    return mapping.get(level, level)
+
+def translate_lifecycle_stage_to_russian(stage: str) -> str:
+    """Переводит lifecycle_stage на русский язык"""
+    mapping = {
+        "PRE_RELEASE": "До релиза",
+        "SOFT_LAUNCH": "Мягкий запуск",
+        "BREAKOUT": "Прорыв",
+        "GROWTH": "Рост",
+        "MATURITY": "Зрелость",
+        "DECLINE": "Спад",
+        "RELAUNCH_CANDIDATE": "Кандидат на перезапуск"
+    }
+    return mapping.get(stage, stage)
+
+def translate_growth_type_to_russian(growth_type: str) -> str:
+    """Переводит growth_type на русский язык"""
+    mapping = {
+        "ORGANIC": "Органический",
+        "HYPE": "Хайп",
+        "NEWS_DRIVEN": "Новостной",
+        "PLATFORM_DRIVEN": "Платформенный",
+        "MIXED": "Смешанный"
+    }
+    return mapping.get(growth_type, growth_type)
+
+# ============================================================
 # Health & Admin Endpoints
 # ============================================================
 
@@ -468,226 +517,231 @@ async def aggregate_trends_daily(
         }
 
 
-@router.get("/games/emerging")
+@router.get("/emerging")
 async def get_emerging_games(
     limit: int = Query(50, ge=1, le=100),
+    min_score: float = Query(2.0, ge=0.0, le=100.0, description="Минимальный emerging_score"),
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
     """
-    Get emerging games with investment intelligence (v2).
+    Emerging Games v4 Final - Steam-only, честный радар.
     
-    Returns games with:
-    - emerging_score (computed from components)
-    - verdict (human-readable interpretation)
-    - explanation (list of reasons)
-    - flags (logical flags with reasons)
-    - score_components (breakdown of score calculation)
+    Использует только steam_review_daily и steam_app_cache.
+    Полностью отделён от TrendsBrain.
+    
+    Returns:
+        {
+            "status": "ok",
+            "emerging": [
+                {
+                    "app_id": int,
+                    "name": str,
+                    "recent_reviews_30d": int,
+                    "positive_ratio": float,
+                    "emerging_score": float,
+                    "verdict": str
+                }
+            ]
+        }
     """
-    from apps.worker.analysis.trends_brain import TrendsBrain
-    
-    today = date.today()
-    
-    # Get latest daily aggregates for all active seed apps with review data
-    # + Reddit and YouTube signals
-    query = text("""
+    try:
+        from apps.worker.analysis.emerging_engine_v4 import analyze_emerging
+        
+        # SQL запрос: только steam_review_daily и steam_app_cache
+        query = text("""
         SELECT 
-            tgd.steam_app_id,
-            tgd.day,
-            tgd.reviews_total,
-            tgd.reviews_delta_1d,
-            tgd.reviews_delta_7d,
-            tgd.discussions_delta_7d,
-            tgd.positive_ratio,
-            tgd.tags,
-            COALESCE(f.name, c.name, NULL) as name,
-            f.release_date,
-            -- Reddit signals
-            MAX(CASE WHEN rs_reddit.source = 'reddit' AND rs_reddit.signal_type = 'reddit_posts_count_7d' THEN rs_reddit.value_numeric END)::int as reddit_posts_count_7d,
-            MAX(CASE WHEN rs_reddit.source = 'reddit' AND rs_reddit.signal_type = 'reddit_comments_count_7d' THEN rs_reddit.value_numeric END)::int as reddit_comments_count_7d,
-            MAX(CASE WHEN rs_reddit.source = 'reddit' AND rs_reddit.signal_type = 'reddit_velocity' THEN rs_reddit.value_numeric END)::int as reddit_velocity,
-            -- YouTube signals
-            MAX(CASE WHEN rs_yt.source = 'youtube' AND rs_yt.signal_type = 'youtube_videos_count_7d' THEN rs_yt.value_numeric END)::int as youtube_videos_count_7d,
-            MAX(CASE WHEN rs_yt.source = 'youtube' AND rs_yt.signal_type = 'youtube_views_7d' THEN rs_yt.value_numeric END)::int as youtube_views_7d,
-            MAX(CASE WHEN rs_yt.source = 'youtube' AND rs_yt.signal_type = 'youtube_velocity' THEN rs_yt.value_numeric END)::int as youtube_velocity
-        FROM trends_game_daily tgd
-        JOIN trends_seed_apps seed ON seed.steam_app_id = tgd.steam_app_id
-        LEFT JOIN steam_app_facts f ON f.steam_app_id = tgd.steam_app_id
-        LEFT JOIN steam_app_cache c ON c.steam_app_id = tgd.steam_app_id
-        LEFT JOIN trends_raw_signals rs_reddit ON rs_reddit.steam_app_id = tgd.steam_app_id
-            AND rs_reddit.source = 'reddit'
-            AND DATE(rs_reddit.captured_at) = tgd.day
-        LEFT JOIN trends_raw_signals rs_yt ON rs_yt.steam_app_id = tgd.steam_app_id
-            AND rs_yt.source = 'youtube'
-            AND DATE(rs_yt.captured_at) = tgd.day
-        WHERE seed.is_active = true
-          AND tgd.day = (
-              SELECT MAX(day) FROM trends_game_daily WHERE steam_app_id = tgd.steam_app_id
-          )
-        GROUP BY tgd.steam_app_id, tgd.day, tgd.reviews_total, tgd.reviews_delta_1d, tgd.reviews_delta_7d,
-                 tgd.discussions_delta_7d, tgd.positive_ratio, tgd.tags, f.name, f.release_date
-        ORDER BY tgd.steam_app_id
-    """)
-    
-    rows = db.execute(query).mappings().all()
-    
-    # Инициализируем "мозг" платформы
-    brain = TrendsBrain(db)
-    
-    # Анализируем каждую игру
-    games_analyzed = []
-    
-    for row in rows:
-        steam_app_id = row["steam_app_id"]
-        release_date = row["release_date"]
-        reviews_total = row["reviews_total"]
-        reviews_delta_7d = row["reviews_delta_7d"]
-        reviews_delta_1d = row["reviews_delta_1d"]
-        positive_ratio = row["positive_ratio"]
-        
-        # Парсим теги
-        tags = row["tags"]
-        tags_list = []
-        if tags:
-            if isinstance(tags, str):
-                try:
-                    tags_list = json.loads(tags)
-                except:
-                    tags_list = []
-            elif isinstance(tags, list):
-                tags_list = tags
-        
-        # Получаем name из БД если не пришёл из запроса
-        # Try multiple sources: steam_app_facts, steam_app_cache
-        game_name = row["name"]
-        if not game_name or not game_name.strip():
-            try:
-                # Try steam_app_facts first
-                name_result = db.execute(
-                    text("""
-                        SELECT name
-                        FROM steam_app_facts
-                        WHERE steam_app_id = :app_id
-                          AND name IS NOT NULL
-                          AND name != ''
-                        LIMIT 1
-                    """),
-                    {"app_id": steam_app_id}
-                ).scalar()
-                if name_result:
-                    game_name = name_result
-                else:
-                    # Fallback to steam_app_cache
-                    name_result = db.execute(
-                        text("""
-                            SELECT name
-                            FROM steam_app_cache
-                            WHERE steam_app_id = :app_id
-                              AND name IS NOT NULL
-                              AND name != ''
-                            LIMIT 1
-                        """),
-                        {"app_id": steam_app_id}
-                    ).scalar()
-                    if name_result:
-                        game_name = name_result
-            except Exception as name_err:
-                logger.debug(f"Failed to get name for app {steam_app_id}: {name_err}")
-        
-        # Reddit signals
-        reddit_posts_count_7d = row.get("reddit_posts_count_7d")
-        reddit_comments_count_7d = row.get("reddit_comments_count_7d")
-        reddit_velocity = row.get("reddit_velocity")
-        
-        # YouTube signals
-        youtube_videos_count_7d = row.get("youtube_videos_count_7d")
-        youtube_views_7d = row.get("youtube_views_7d")
-        youtube_velocity = row.get("youtube_velocity")
-        
-        # Полный анализ игры (мультимодальный)
-        try:
-            analysis = brain.analyze_game(
-                steam_app_id=steam_app_id,
-                name=game_name,
-                release_date=release_date,
-                reviews_total=reviews_total,
-                reviews_delta_7d=reviews_delta_7d,
-                reviews_delta_1d=reviews_delta_1d,
-                positive_ratio=positive_ratio,
-                tags=tags_list,
-                # Reddit signals
-                reddit_posts_count_7d=reddit_posts_count_7d,
-                reddit_comments_count_7d=reddit_comments_count_7d,
-                reddit_velocity=reddit_velocity,
-                # YouTube signals
-                youtube_videos_count_7d=youtube_videos_count_7d,
-                youtube_views_7d=youtube_views_7d,
-                youtube_velocity=youtube_velocity
+            seed.steam_app_id,
+            srd.all_reviews_count,
+            srd.recent_reviews_count_30d,
+            srd.all_positive_percent,
+            srd.day,
+            -- Game name: prefer cache.name (most reliable), fallback to facts.name
+            COALESCE(
+                NULLIF(c.name, ''),
+                NULLIF(f.name, ''),
+                'App #' || seed.steam_app_id::text
+            ) as game_name,
+            -- Steam URL: prefer cache.steam_url, fallback to constructed URL
+            COALESCE(
+                NULLIF(c.steam_url, ''),
+                'https://store.steampowered.com/app/' || seed.steam_app_id::text || '/'
+            ) as steam_url,
+            f.release_date
+        FROM trends_seed_apps seed
+        LEFT JOIN steam_review_daily srd ON srd.steam_app_id = seed.steam_app_id
+            AND srd.day = (
+                SELECT MAX(day) FROM steam_review_daily WHERE steam_app_id = seed.steam_app_id
             )
-            
-            # Исключаем evergreen giants
-            if analysis.flags.is_evergreen_giant:
+        LEFT JOIN steam_app_facts f ON f.steam_app_id = seed.steam_app_id
+        LEFT JOIN steam_app_cache c ON c.steam_app_id = seed.steam_app_id::bigint
+        WHERE seed.is_active = true
+          AND srd.all_reviews_count IS NOT NULL
+        ORDER BY seed.steam_app_id
+        """)
+        
+        try:
+            rows = db.execute(query).mappings().all()
+        except Exception as e:
+            logger.error(f"Failed to fetch emerging games data: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": str(e),
+                "emerging": []
+            }
+        
+        # Анализируем каждую игру через Emerging Engine v4
+        emerging_games = []
+        
+        for row in rows:
+            try:
+                # Преобразуем row в dict для analyze_emerging
+                app_row = {
+                    "steam_app_id": row["steam_app_id"],
+                    "all_reviews_count": row["all_reviews_count"],
+                    "recent_reviews_count_30d": row["recent_reviews_count_30d"],
+                    "all_positive_percent": row["all_positive_percent"],
+                    "game_name": row.get("game_name"),
+                    "steam_url": row.get("steam_url"),
+                    "release_date": row.get("release_date")
+                }
+                
+                result = analyze_emerging(app_row)
+                
+                # Фильтруем по min_score и passed_filters
+                if result["passed_filters"] and result["emerging_score"] >= min_score:
+                    emerging_games.append(result)
+                    
+            except Exception as e:
+                logger.error(f"Error analyzing game {row.get('steam_app_id')}: {e}", exc_info=True)
                 continue
-            
-            # Исключаем игры без сигналов
-            if analysis.emerging_score == 0 and not (reviews_delta_7d or reviews_delta_1d or positive_ratio):
-                continue
-            
-            # Формируем ответ
-            game_result = {
-                "steam_app_id": steam_app_id,
-                "name": analysis.name or game_name,  # Используем name из анализа или из БД
-                "steam_url": f"https://store.steampowered.com/app/{steam_app_id}/",
-                "day": row["day"].isoformat() if row["day"] else None,
-                "release_date": release_date.isoformat() if release_date else None,
-                "emerging_score": analysis.emerging_score,
-                "verdict": analysis.verdict,
-                "explanation": analysis.explanation,
-                "flags": {
-                    "has_real_growth": analysis.flags.has_real_growth,
-                    "is_evergreen_giant": analysis.flags.is_evergreen_giant,
-                    "is_hype_spike": analysis.flags.is_hype_spike,
-                    "is_low_quality_growth": analysis.flags.is_low_quality_growth,
-                    "is_new_release": analysis.flags.is_new_release,
-                    "is_rediscovered_old_game": analysis.flags.is_rediscovered_old_game,
-                    "reasons": analysis.flags.reasons
-                },
-                "score_components": {
-                    "growth_component": round(analysis.score_components.growth_component, 2),
-                    "velocity_component": round(analysis.score_components.velocity_component, 2),
-                    "sentiment_component": round(analysis.score_components.sentiment_component, 2),
-                    "novelty_component": round(analysis.score_components.novelty_component, 2),
-                    "penalty_component": round(analysis.score_components.penalty_component, 2),
-                    "total": round(analysis.score_components.total(), 2)
-                },
-                # Оставляем старые поля для обратной совместимости
-                "trend_score": analysis.emerging_score,
-                "positive_ratio": float(positive_ratio) if positive_ratio else None,
-                "reviews_delta_7d": reviews_delta_7d,
-                "reviews_delta_1d": reviews_delta_1d,
-                "reviews_total": reviews_total,
-                "discussions_delta_7d": row["discussions_delta_7d"],
-                "why_flagged": ", ".join(analysis.explanation),
-                "tags_sample": tags_list[:5] if tags_list else []
+        
+        # Сортируем по emerging_score (по убыванию)
+        emerging_games.sort(key=lambda x: x["emerging_score"], reverse=True)
+        
+        # Возвращаем top N
+        result = emerging_games[:limit]
+        
+        return {
+            "status": "ok",
+            "emerging": result,
+            "count": len(result),
+            "total_analyzed": len(rows),
+            "filters_applied": {
+                "min_score": min_score
+            }
+        }
+    except Exception as e:
+        logger.exception("get_emerging_games failed")
+        return {
+            "status": "error",
+            "error": str(e),
+            "emerging": []
+        }
+
+
+@router.get("/emerging/diagnostics")
+async def get_emerging_diagnostics(
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """
+    Emerging Diagnostics v4 Final - честный truth-endpoint.
+    Показывает ПОЧЕМУ emerging = 0, если это так.
+    Использует реальные фильтры v4.
+    """
+    from apps.worker.analysis.emerging_engine_v4 import analyze_emerging
+    
+    try:
+        # Получаем все seed apps с данными из steam_review_daily
+        query = text("""
+            SELECT 
+                seed.steam_app_id,
+                srd.all_reviews_count,
+                srd.recent_reviews_count_30d,
+                srd.all_positive_percent,
+                f.release_date,
+                COALESCE(
+                    NULLIF(c.name, ''),
+                    NULLIF(f.name, ''),
+                    'App #' || seed.steam_app_id::text
+                ) as game_name,
+                COALESCE(
+                    NULLIF(c.steam_url, ''),
+                    'https://store.steampowered.com/app/' || seed.steam_app_id::text || '/'
+                ) as steam_url
+            FROM trends_seed_apps seed
+            LEFT JOIN steam_review_daily srd ON srd.steam_app_id = seed.steam_app_id
+                AND srd.day = (
+                    SELECT MAX(day) FROM steam_review_daily WHERE steam_app_id = seed.steam_app_id
+                )
+            LEFT JOIN steam_app_facts f ON f.steam_app_id = seed.steam_app_id
+            LEFT JOIN steam_app_cache c ON c.steam_app_id = seed.steam_app_id::bigint
+            WHERE seed.is_active = true
+            ORDER BY seed.steam_app_id
+        """)
+        
+        rows = db.execute(query).mappings().all()
+        
+        # Счётчики фильтров (реальные фильтры v4)
+        total_seed_apps = len(rows)
+        passed_growth = 0
+        passed_quality = 0
+        filtered_evergreen = 0
+        below_score_threshold = 0
+        emerging_final = 0
+        
+        for row in rows:
+            app_row = {
+                "steam_app_id": row["steam_app_id"],
+                "all_reviews_count": row["all_reviews_count"],
+                "recent_reviews_count_30d": row["recent_reviews_count_30d"],
+                "all_positive_percent": row["all_positive_percent"],
+                "game_name": row.get("game_name"),
+                "steam_url": row.get("steam_url"),
+                "release_date": row.get("release_date")
             }
             
-            games_analyzed.append(game_result)
-            
-        except Exception as e:
-            logger.error(f"Error analyzing game {steam_app_id}: {e}", exc_info=True)
-            continue
-    
-    # Sort by emerging_score descending
-    games_analyzed.sort(key=lambda x: x["emerging_score"], reverse=True)
-    
-    # Return top N
-    result = games_analyzed[:limit]
-    
-    return {
-        "status": "ok",
-        "reason": "success",
-        "count": len(result),
-        "games": result
-    }
+            try:
+                result = analyze_emerging(app_row)
+                filter_results = result.get("filter_results", {})
+                
+                # Подсчитываем прохождение фильтров
+                if filter_results.get("growth"):
+                    passed_growth += 1
+                if filter_results.get("quality"):
+                    passed_quality += 1
+                if filter_results.get("evergreen"):
+                    filtered_evergreen += 1
+                if filter_results.get("score"):
+                    emerging_final += 1
+                elif filter_results.get("growth") and filter_results.get("quality") and not filter_results.get("evergreen"):
+                    below_score_threshold += 1
+                    
+            except Exception as e:
+                logger.warning(f"Failed to analyze game {row.get('steam_app_id')} for diagnostics: {e}")
+                continue
+        
+        return {
+            "status": "ok",
+            "total_seed_apps": total_seed_apps,
+            "passed_growth": passed_growth,
+            "passed_quality": passed_quality,
+            "filtered_evergreen": filtered_evergreen,
+            "below_score_threshold": below_score_threshold,
+            "emerging_final": emerging_final
+        }
+        
+    except Exception as e:
+        logger.error(f"Emerging diagnostics failed: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e),
+            "total_seed_apps": 0,
+            "passed_growth": 0,
+            "passed_quality": 0,
+            "filtered_evergreen": 0,
+            "below_score_threshold": 0,
+            "emerging_final": 0
+        }
 
 
 @router.get("/tags/emerging")

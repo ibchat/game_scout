@@ -317,6 +317,16 @@
       
       <!-- Top 20 Emerging -->
       <h3 style="margin-top: 24px; font-size: 20px;">Топ-20 Emerging Games</h3>
+      
+      <!-- Фильтры (Lifecycle Intelligence v5) -->
+      <div class="filter" id="trends-filters" style="margin-top: 12px; display: none;">
+        <div class="chip active" data-filter-lifecycle="all">Все циклы</div>
+        <div class="chip" data-filter-lifecycle="BREAKOUT">Прорыв</div>
+        <div class="chip" data-filter-lifecycle="GROWTH">Рост</div>
+        <div class="chip" data-filter-lifecycle="RELAUNCH_CANDIDATE">🔁 Перезапуск</div>
+        <div class="chip" data-filter-confidence="high" style="margin-left: 12px;">🟢 Высокий confidence</div>
+      </div>
+      
       <div class="status" id="trends-emerging-status">Загрузка…</div>
       <div id="trends-emerging-table"></div>
       
@@ -584,29 +594,118 @@
   // Навигация по вкладкам
   // ==========================================
   function switchTab(tab){
-    if(!tab) return;
+    if(!tab) {
+      console.warn("switchTab called without tab parameter");
+      return;
+    }
     
-    qsa(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === tab));
-    qsa("section.panel").forEach(p => p.classList.add("hidden"));
+    console.log(`Switching to tab: ${tab}`);
     
+    // Обновляем активную вкладку
+    qsa(".tab").forEach(t => {
+      const isActive = t.dataset.tab === tab;
+      t.classList.toggle("active", isActive);
+    });
+    
+    // Скрываем все панели
+    qsa("section.panel").forEach(p => {
+      p.classList.add("hidden");
+    });
+    
+    // Показываем нужную панель
     const panel = qs(`#panel-${tab}`);
     if(panel) {
       panel.classList.remove("hidden");
+      console.log(`Panel #panel-${tab} shown`);
+    } else {
+      console.error(`Panel #panel-${tab} not found!`);
     }
 
     // Ленивая загрузка: дергаем бэкенд только когда вкладка открыта
     try {
-      if(tab === "system") loadSystem();
-      else if(tab === "trends") loadTrends();
-      else if(tab === "sources") loadSources();
-      else if(tab === "games") loadGames();
-      else if(tab === "relaunch") loadRelaunch();
-      else if(tab === "actions") loadActions();
+      if(tab === "system") {
+        loadSystem();
+      } else if(tab === "trends") {
+        loadTrends();
+      } else if(tab === "sources") {
+        loadSources();
+      } else if(tab === "games") {
+        loadGames();
+      } else if(tab === "relaunch") {
+        loadRelaunch();
+      } else if(tab === "actions") {
+        loadActions();
+      }
     } catch(e) {
       console.error(`Error loading tab ${tab}:`, e);
+      showToast(`Ошибка загрузки вкладки ${tab}: ${e.message}`, true);
     }
   }
-  qsa(".tab").forEach(t => t.addEventListener("click", () => switchTab(t.dataset.tab)));
+  
+  // Инициализация вкладок после загрузки DOM
+  function initTabs() {
+    const tabs = qsa(".tab");
+    if (tabs.length === 0) {
+      console.warn("No tabs found, retrying...");
+      setTimeout(initTabs, 100);
+      return;
+    }
+    tabs.forEach(t => {
+      if (t.dataset.tab) {
+        t.addEventListener("click", () => switchTab(t.dataset.tab));
+      }
+    });
+  }
+  
+  // Инициализируем вкладки - гарантируем вызов после загрузки DOM
+  function initializeDashboard() {
+    try {
+      console.log("🚀 Initializing dashboard...");
+      
+      // Проверяем наличие вкладок
+      const tabs = qsa(".tab[data-tab]");
+      console.log(`Found ${tabs.length} tabs`);
+      
+      if (tabs.length === 0) {
+        console.error("❌ No tabs found! Retrying in 100ms...");
+        setTimeout(initializeDashboard, 100);
+        return;
+      }
+      
+      // Инициализируем обработчики вкладок
+      initTabs();
+      
+      // Загружаем первую вкладку (system) если она активна
+      const activeTab = qs(".tab.active");
+      if (activeTab && activeTab.dataset.tab) {
+        console.log(`✅ Active tab found: ${activeTab.dataset.tab}`);
+        switchTab(activeTab.dataset.tab);
+      } else {
+        // Если нет активной вкладки, активируем первую
+        const firstTab = tabs[0];
+        if (firstTab && firstTab.dataset.tab) {
+          console.log(`⚠️ No active tab, activating first: ${firstTab.dataset.tab}`);
+          firstTab.classList.add("active");
+          switchTab(firstTab.dataset.tab);
+        } else {
+          console.error("❌ No valid tabs found!");
+        }
+      }
+    } catch(e) {
+      console.error("❌ Error in initializeDashboard:", e);
+      showToast(`Ошибка инициализации: ${e.message}`, true);
+    }
+  }
+  
+  // Запускаем инициализацию после загрузки DOM
+  if (document.readyState === 'loading') {
+    console.log("⏳ DOM is loading, waiting for DOMContentLoaded...");
+    document.addEventListener('DOMContentLoaded', initializeDashboard);
+  } else {
+    // DOM уже загружен
+    console.log("✅ DOM already loaded, initializing immediately...");
+    initializeDashboard();
+  }
 
   // ==========================================
   // Универсальные helpers
@@ -678,6 +777,37 @@
     return String(s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
   }
 
+  function toggleWhyNow(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    
+    // Закрываем все остальные блоки
+    document.querySelectorAll('[id^="why-now-"]').forEach(e => {
+      if (e.id !== id) e.style.display = 'none';
+    });
+    
+    // Переключаем текущий
+    if (el.style.display === 'none' || !el.style.display) {
+      el.style.display = 'block';
+      // Позиционируем относительно кнопки
+      const button = el.previousElementSibling;
+      if (button) {
+        const rect = button.getBoundingClientRect();
+        el.style.left = rect.left + 'px';
+        el.style.top = (rect.bottom + 4) + 'px';
+      }
+    } else {
+      el.style.display = 'none';
+    }
+  }
+  
+  // Закрываем блоки при клике вне их
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('[id^="why-now-"]') && !e.target.closest('button[onclick*="toggleWhyNow"]')) {
+      document.querySelectorAll('[id^="why-now-"]').forEach(el => el.style.display = 'none');
+    }
+  });
+
   function showToast(message, isError = false) {
     // Простой toast для уведомлений
     const toast = document.createElement('div');
@@ -716,10 +846,11 @@
       }
       
       // Статус компонентов
-      const apiOk = summary.api?.ok || false;
-      const dbOk = summary.db?.ok || false;
-      const workerStatus = summary.worker?.status || "unknown";
-      const workerHint = summary.worker?.hint || "";
+      const health = summary.health || {};
+      const apiOk = health.api?.status === "ok" || false;
+      const dbOk = health.database?.status === "ok" || false;
+      const workerStatus = health.worker?.status || "unknown";
+      const workerHint = health.worker?.hint || "";
       
       statusCards.innerHTML = `
         <div class="kpi ${apiOk ? '' : 'val red'}">
@@ -746,7 +877,11 @@
         </div>
         <div class="kpi">
           <div class="label">Reviews (сегодня)</div>
-          <div class="val">${tt.steam_review_daily || 0}</div>
+          <div class="val">${tt.reviews_count || 0}</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Jobs</div>
+          <div class="val">${tt.jobs_queued || 0}</div>
         </div>
         <div class="kpi">
           <div class="label">Game Daily</div>
@@ -833,8 +968,65 @@
       
       // Top 20 Emerging - используем прямой вызов API для получения полного анализа
       try {
-        const emergingData = await jget(`${API}/trends/games/emerging?limit=20`);
+        const emergingData = await jget(`${API}/trends/games/emerging?limit=20`).catch(err => {
+          console.error("Emerging API error:", err);
+          return { games: [] };
+        });
         const top20 = emergingData.games || [];
+        
+        // Engine v5: Вычисляем реальное влияние источников на основе компонентов
+        let redditInfluence = 0;
+        let youtubeInfluence = 0;
+        let steamInfluence = 0;
+        let gamesWithReddit = 0;
+        let gamesWithYouTube = 0;
+        let gamesWithSteam = 0;
+        
+        top20.forEach(g => {
+          const components = g.score_components || {};
+          const redditComp = components.reddit_component || 0;
+          const youtubeComp = components.youtube_component || 0;
+          const confirmationComp = components.score_confirmation || 0;
+          
+          if (redditComp > 0) {
+            redditInfluence += redditComp;
+            gamesWithReddit++;
+          } else if (redditComp < 0) {
+            // Anti-hype: отрицательный компонент тоже считается влиянием
+            redditInfluence += Math.abs(redditComp);
+            gamesWithReddit++;
+          }
+          
+          if (youtubeComp > 0) {
+            youtubeInfluence += youtubeComp;
+            gamesWithYouTube++;
+          } else if (youtubeComp < 0) {
+            youtubeInfluence += Math.abs(youtubeComp);
+            gamesWithYouTube++;
+          }
+          
+          if (confirmationComp > 0) {
+            steamInfluence += confirmationComp;
+            gamesWithSteam++;
+          }
+        });
+        
+        const totalInfluence = redditInfluence + youtubeInfluence + steamInfluence;
+        const redditPct = totalInfluence > 0 ? Math.round((redditInfluence / totalInfluence) * 100) : 0;
+        const youtubePct = totalInfluence > 0 ? Math.round((youtubeInfluence / totalInfluence) * 100) : 0;
+        const steamPct = totalInfluence > 0 ? Math.round((steamInfluence / totalInfluence) * 100) : 0;
+        
+        // Сохраняем для использования в loadSources
+        window.emergingInfluenceData = {
+          games_found: top20.length,
+          reddit_pct: redditPct,
+          youtube_pct: youtubePct,
+          steam_pct: steamPct,
+          games_with_reddit: gamesWithReddit,
+          games_with_youtube: gamesWithYouTube,
+          games_with_steam: gamesWithSteam,
+          total_influence: totalInfluence
+        };
         
         if(top20.length === 0) {
           emergingStatus.innerHTML = `
@@ -850,47 +1042,223 @@
           emergingTable.innerHTML = "";
         } else {
           emergingStatus.textContent = `Найдено ${top20.length} игр`;
+          
+          // Показываем фильтры
+          const filtersEl = qs("#trends-filters");
+          if (filtersEl) filtersEl.style.display = "flex";
+          
           emergingTable.innerHTML = `
             <table class="table" style="margin-top: 12px;">
               <thead>
                 <tr>
                   <th>Ранг</th>
-                  <th>Название</th>
-                  <th>Verdict</th>
-                  <th>Score</th>
+                  <th>Игра</th>
+                  <th>Вердикт</th>
+                  <th>Балл</th>
+                  <th>Уверенность</th>
+                  <th>Стадия</th>
+                  <th>Жизненный цикл</th>
+                  <th>Тип роста</th>
+                  <th>Источники</th>
+                  <th>Ссылки</th>
                   <th>Отзывы</th>
-                  <th>Положит. %</th>
-                  <th>Δ 1д</th>
-                  <th>Δ 7д</th>
-                  <th>Объяснение</th>
+                  <th>Δ 7 дней</th>
+                  <th>Почему сейчас</th>
                 </tr>
               </thead>
               <tbody>
                 ${top20.map((g, idx) => {
-                  const verdict = g.verdict || 'N/A';
-                  const verdictColor = verdict.includes('Strong') ? 'var(--green)' : 
-                                      verdict.includes('Hype') ? 'var(--orange)' : 
-                                      verdict.includes('Weak') ? 'var(--muted)' : 'var(--blue)';
-                  const explanation = (g.explanation || []).slice(0, 2).join('; ') || 'N/A';
+                  // Перевод Verdict
+                  const verdictRaw = g.verdict || '';
+                  let verdict = verdictRaw;
+                  let verdictColor = 'var(--muted)';
                   
-                  // Формируем название и ссылку
+                  if (verdictRaw.includes('Strong') || verdictRaw.includes('organic')) {
+                    verdict = 'Сильный сигнал';
+                    verdictColor = 'var(--green)';
+                  } else if (verdictRaw.includes('Hype') || verdictRaw.includes('spike')) {
+                    verdict = 'Хайп-всплеск';
+                    verdictColor = 'var(--orange)';
+                  } else if (verdictRaw.includes('Weak') || verdictRaw.includes('Limited')) {
+                    verdict = 'Слабый сигнал';
+                    verdictColor = 'var(--muted)';
+                  } else if (verdictRaw.includes('Early')) {
+                    verdict = 'Ранний сигнал';
+                    verdictColor = 'var(--orange)';
+                  } else if (verdictRaw.includes('Moderate') || verdictRaw.includes('Promising')) {
+                    verdict = 'Умеренный рост';
+                    verdictColor = 'var(--blue)';
+                  } else if (verdictRaw) {
+                    verdict = verdictRaw; // Оставляем как есть если не распознали
+                  } else {
+                    verdict = 'Нет данных';
+                  }
+                  
+                  // Формируем название и ссылку (используем game_name из API)
                   const steamUrl = g.steam_url || `https://store.steampowered.com/app/${g.steam_app_id}/`;
-                  const displayName = (g.name && g.name.trim()) ? g.name : `App ${g.steam_app_id}`;
+                  let displayName = (g.game_name || g.name);
+                  const isUnknown = !displayName || !displayName.trim() || displayName.includes('Unknown') || displayName.includes('App #');
+                  
+                  if (isUnknown) {
+                    displayName = `Unknown Game (#${g.steam_app_id})`;
+                  }
+                  
+                  // Brain v3 fields
+                  const confidenceScore = g.confidence_score || 0;
+                  const confidenceLevelRaw = g.confidence_level || 'LOW';
+                  
+                  // Перевод Confidence (используем уже переведённое значение из API)
+                  let confidenceLevel = confidenceLevelRaw; // API уже возвращает на русском
+                  let confidenceColor = 'var(--muted)';
+                  if (confidenceLevelRaw === 'Высокая' || confidenceLevelRaw === 'HIGH') {
+                    confidenceColor = 'var(--green)';
+                  } else if (confidenceLevelRaw === 'Средняя' || confidenceLevelRaw === 'MEDIUM') {
+                    confidenceColor = 'var(--orange)';
+                  }
+                  
+                  // Stage (используем уже переведённое значение из API)
+                  const stage = g.stage || 'Шум';
+                  let stageColor = 'var(--muted)';
+                  if (stage.includes('Прорыв')) {
+                    stageColor = 'var(--green)';
+                  } else if (stage.includes('Подтверждение')) {
+                    stageColor = 'var(--blue)';
+                  } else if (stage.includes('Ранний')) {
+                    stageColor = 'var(--orange)';
+                  }
+                  
+                  // Lifecycle Intelligence v5
+                  const lifecycleStage = g.lifecycle_stage || 'Зрелость';
+                  let lifecycleColor = 'var(--muted)';
+                  let lifecycleIcon = '';
+                  if (lifecycleStage.includes('Прорыв')) {
+                    lifecycleColor = 'var(--green)';
+                  } else if (lifecycleStage.includes('Рост')) {
+                    lifecycleColor = 'var(--blue)';
+                  } else if (lifecycleStage.includes('Кандидат на перезапуск')) {
+                    lifecycleColor = 'var(--orange)';
+                    lifecycleIcon = '🔁 ';
+                  } else if (lifecycleStage.includes('Спад')) {
+                    lifecycleColor = 'var(--red)';
+                  }
+                  
+                  // Anti-Hype Layer v5: Тип роста
+                  const growthType = g.growth_type || 'Органический';
+                  let growthTypeColor = 'var(--green)';
+                  let growthTypeTooltip = 'Рост подтверждён несколькими источниками';
+                  if (growthType.includes('Хайп')) {
+                    growthTypeColor = 'var(--orange)';
+                    growthTypeTooltip = 'Риск хайпа: рост только в социальных сетях без подтверждения Steam';
+                  } else if (growthType.includes('Новостной')) {
+                    growthTypeColor = 'var(--blue)';
+                    growthTypeTooltip = 'Рост на новостях: обновления в Steam';
+                  } else if (growthType.includes('Платформенный')) {
+                    growthTypeColor = 'var(--muted)';
+                    growthTypeTooltip = 'Рост только в Steam, без внешних сигналов';
+                  } else if (growthType.includes('Смешанный')) {
+                    growthTypeColor = 'var(--green)';
+                    growthTypeTooltip = 'Множественные источники согласованы';
+                  }
+                  
+                  // WHY NOW v2
+                  const whyNowV2 = g.why_now_v2 || null;
+                  const whyNow = g.why_now || 'Недостаточно данных для анализа';
+                  const signalsUsed = g.signals_used || [];
+                  
+                  // Final rank score (v5: confidence как фактор)
+                  const finalRankScore = g.final_rank_score || g.emerging_score || 0;
+                  
+                  // Signals badges
+                  const signalsBadges = signalsUsed.map(s => {
+                    if (s === 'steam_reviews') return '<span style="background: rgba(110,168,255,0.2); padding: 2px 6px; border-radius: 3px; font-size: 10px;">Steam</span>';
+                    if (s === 'reddit') return '<span style="background: rgba(255,184,107,0.2); padding: 2px 6px; border-radius: 3px; font-size: 10px;">Reddit</span>';
+                    if (s === 'youtube') return '<span style="background: rgba(255,107,129,0.2); padding: 2px 6px; border-radius: 3px; font-size: 10px;">YouTube</span>';
+                    if (s === 'steam_news') return '<span style="background: rgba(110,255,184,0.2); padding: 2px 6px; border-radius: 3px; font-size: 10px;">News</span>';
+                    return '';
+                  }).join(' ');
+                  
+                  // Engine v4: Evidence links
+                  const evidence = g.evidence || [];
+                  const evidenceLinks = evidence.slice(0, 3).map(ev => {
+                    const sourceIcon = ev.source === 'steam_news' ? '📰' : 
+                                     ev.source === 'reddit' ? '💬' : 
+                                     ev.source === 'youtube' ? '🎥' : '🔗';
+                    const title = ev.title || 'Без названия';
+                    const url = ev.url || '#';
+                    return `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="${esc(title)}" style="text-decoration: none; margin: 0 2px; font-size: 14px;">${sourceIcon}</a>`;
+                  }).join('');
+                  
+                  const evidenceTooltip = evidence.length > 0 ? 
+                    evidence.map(ev => `${ev.source}: ${ev.title || 'Без названия'}`).join('\\n') : 
+                    'Нет ссылок';
+                  
+                  // WHY NOW v2: кнопка с раскрывающимся блоком
+                  const whyNowV2Id = `why-now-${g.steam_app_id}-${idx}`;
+                  let whyNowButton = '';
+                  let whyNowContent = '';
+                  
+                  if (whyNowV2 && whyNowV2.основной_триггер) {
+                    whyNowButton = `<button onclick="toggleWhyNow('${whyNowV2Id}')" style="background: rgba(110,168,255,0.2); border: 1px solid rgba(110,168,255,0.3); color: var(--blue); padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; white-space: nowrap;">Почему сейчас?</button>`;
+                    whyNowContent = `
+                      <div id="${whyNowV2Id}" style="display: none; position: fixed; background: var(--panel); border: 1px solid var(--stroke); border-radius: 8px; padding: 12px; z-index: 10000; max-width: 400px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); margin-top: 4px;">
+                        <div style="font-weight: 600; margin-bottom: 8px; color: var(--blue);">${esc(whyNowV2.основной_триггер || '')}</div>
+                        ${whyNowV2.дополнительные_факторы && whyNowV2.дополнительные_факторы.length > 0 ? `
+                          <div style="margin-top: 8px; font-size: 12px;">
+                            <div style="color: var(--muted); margin-bottom: 4px;">Дополнительные факторы:</div>
+                            ${whyNowV2.дополнительные_факторы.map(f => `<div style="margin-left: 8px; margin-top: 2px;">• ${esc(f)}</div>`).join('')}
+                          </div>
+                        ` : ''}
+                        ${whyNowV2.аномалия ? `<div style="margin-top: 8px; font-size: 12px; color: var(--orange);">⚠️ ${esc(whyNowV2.аномалия)}</div>` : ''}
+                        ${whyNowV2.риски ? `<div style="margin-top: 8px; font-size: 12px; color: var(--red);">⚠️ Риски: ${esc(whyNowV2.риски)}</div>` : ''}
+                        ${whyNowV2.инвестиционное_окно_дней > 0 ? `<div style="margin-top: 8px; font-size: 11px; color: var(--muted);">⏱ Окно возможностей: ${whyNowV2.инвестиционное_окно_дней} дней</div>` : ''}
+                      </div>
+                    `;
+                  } else {
+                    whyNowButton = `<span style="font-size: 11px; color: var(--muted);" title="${esc(whyNow)}">${esc(whyNow.length > 50 ? whyNow.substring(0, 50) + '...' : whyNow)}</span>`;
+                  }
+                  
+                  // Цвет карточки по confidence (v5)
+                  let rowBgColor = '';
+                  if (confidenceScore >= 70) {
+                    rowBgColor = 'rgba(121,226,155,0.05)'; // Зелёный для высокого confidence
+                  } else if (confidenceScore >= 40) {
+                    rowBgColor = 'rgba(255,184,107,0.05)'; // Оранжевый для среднего
+                  } else {
+                    rowBgColor = 'rgba(255,107,129,0.05)'; // Красный для низкого
+                  }
                   
                   return `
-                    <tr>
+                    <tr style="background: ${rowBgColor};" data-lifecycle-stage="${g.lifecycle_stage_raw || ''}" data-confidence-level="${g.confidence_level_raw || ''}">
                       <td>${idx + 1}</td>
                       <td>
-                        <a href="${esc(steamUrl)}" target="_blank" rel="noopener noreferrer" style="color: var(--blue); text-decoration: underline; text-decoration-color: rgba(110,168,255,0.5); transition: text-decoration-color 0.2s;" onmouseover="this.style.textDecorationColor='var(--blue)'" onmouseout="this.style.textDecorationColor='rgba(110,168,255,0.5)'">${esc(displayName)}</a>
+                        ${isUnknown ? '<span style="color: var(--orange);">⚠️</span> ' : ''}
+                        <a href="${esc(steamUrl)}" target="_blank" rel="noopener noreferrer" style="color: var(--blue); text-decoration: underline; text-decoration-color: rgba(110,168,255,0.5); transition: text-decoration-color 0.2s;" onmouseover="this.style.textDecorationColor='var(--blue)'" onmouseout="this.style.textDecorationColor='rgba(110,168,255,0.5)'">${esc(displayName.replace(/\(#\d+\)/g, '').trim())}</a>
                         <span style="color: var(--muted); font-size: 11px; margin-left: 6px;">(#${g.steam_app_id || ''})</span>
                       </td>
-                      <td style="color: ${verdictColor}; font-weight: 600;">${esc(verdict)}</td>
-                      <td><strong>${g.emerging_score || g.trend_score || 0}</strong></td>
-                      <td>${g.reviews_total || 'N/A'}</td>
-                      <td>${g.positive_ratio ? (g.positive_ratio * 100).toFixed(1) + '%' : 'N/A'}</td>
-                      <td>${g.reviews_delta_1d || 'N/A'}</td>
-                      <td>${g.reviews_delta_7d || 'N/A'}</td>
-                      <td style="font-size: 11px; color: var(--muted); max-width: 300px;" title="${esc((g.explanation || []).join('; '))}">${esc(explanation)}</td>
+                      <td style="color: ${verdictColor}; font-weight: 600; font-size: 12px;">${esc(verdict)}</td>
+                      <td>
+                        <strong>${finalRankScore.toFixed(1)}</strong>
+                        ${finalRankScore !== (g.emerging_score || 0) ? `<div style="font-size: 9px; color: var(--muted);">(${(g.emerging_score || 0).toFixed(1)})</div>` : ''}
+                      </td>
+                      <td style="color: ${confidenceColor}; font-size: 12px;">
+                        <div>${esc(confidenceLevel)}</div>
+                        <div style="font-size: 10px; color: var(--muted);">${confidenceScore.toFixed(0)}</div>
+                      </td>
+                      <td style="color: ${stageColor}; font-size: 12px; font-weight: 600;">${esc(stage)}</td>
+                      <td style="color: ${lifecycleColor}; font-size: 11px; font-weight: 600;">
+                        ${lifecycleIcon}${esc(lifecycleStage)}
+                      </td>
+                      <td title="${esc(growthTypeTooltip)}" style="font-size: 11px;">
+                        <span style="background: ${growthTypeColor}20; color: ${growthTypeColor}; padding: 2px 6px; border-radius: 3px; border: 1px solid ${growthTypeColor}40;">${esc(growthType)}</span>
+                      </td>
+                      <td style="font-size: 11px;">${signalsBadges || '<span style="color: var(--muted);">—</span>'}</td>
+                      <td title="${esc(evidenceTooltip)}" style="font-size: 14px; text-align: center;">${evidenceLinks || '<span style="color: var(--muted);">—</span>'}</td>
+                      <td>${g.reviews_total || '—'}</td>
+                      <td>${g.reviews_delta_7d || '—'}</td>
+                      <td style="font-size: 11px; position: relative;">
+                        ${whyNowButton}
+                        ${whyNowContent}
+                      </td>
                     </tr>
                   `;
                 }).join("")}
@@ -923,10 +1291,25 @@
       const youtubeHealth = await jget(`${API}/youtube/health`).catch(() => null);
       const redditHealth = await jget(`${API}/reddit/health`).catch(() => null);
       
-      const tt = summary?.trends_today || {};
+      // Безопасный доступ к summary.trends_today
+      const tt = (summary && summary.trends_today) ? summary.trends_today : {};
       const signals = tt.signals_numeric || [];
       const emergingInfluence = tt.emerging_influence || {};
       const blindSpots = tt.blind_spots || [];
+      
+      // Безопасный доступ к signalsCoverage и signalsFreshness
+      const signalsCoverage = tt.signals_coverage || {
+        steam_reviews: {apps_with_signals: 0, signals_total: 0, total_apps: 0, pct: 0, active: false},
+        steam_store: {apps_with_signals: 0, signals_total: 0, total_apps: 0, pct: 0, active: false},
+        reddit: {apps_with_signals: 0, signals_total: 0, total_apps: 0, pct: 0, active: false},
+        youtube: {apps_with_signals: 0, signals_total: 0, total_apps: 0, pct: 0, active: false}
+      };
+      const signalsFreshness = tt.signals_freshness || {
+        steam_reviews: {last_captured_at: null, age_minutes: null},
+        steam_store: {last_captured_at: null, age_minutes: null},
+        reddit: {last_captured_at: null, age_minutes: null},
+        youtube: {last_captured_at: null, age_minutes: null}
+      };
       
       let html = '';
       
@@ -945,48 +1328,55 @@
       // 2. Умные карточки источников
       html += '<div class="cards" style="margin-bottom: 24px;">';
       
-      // Steam Reviews
-      const steamReviews = tt.steam_review_daily || 0;
-      const steamActive = steamReviews > 0;
-      html += `
-        <div class="kpi" style="min-height: 200px;" title="Основной количественный источник. Используется для оценки масштаба игры, качества аудитории и фильтрации evergreen-тайтлов.">
-          <div class="label">Steam Reviews</div>
-          <div class="val ${steamActive ? 'green' : 'orange'}">${steamActive ? '🟢 Активен' : '🟠 Неактивен'}</div>
-          <div style="font-size: 12px; margin-top: 12px; color: var(--muted);">
-            <div style="margin-bottom: 8px;">📊 Записей сегодня: <strong>${steamReviews}</strong></div>
-            <div style="margin-bottom: 8px;">
-              <div style="font-weight: 600; margin-bottom: 4px;">🎯 Используется в:</div>
-              <div style="margin-left: 8px;">• Emerging Score</div>
-              <div style="margin-left: 8px;">• Evergreen Filter</div>
-            </div>
-            <div style="margin-bottom: 8px;">
-              <div style="font-weight: 600; margin-bottom: 4px;">🧠 Сигналы:</div>
-              <div style="margin-left: 8px; font-size: 11px;">• all_reviews_count</div>
-              <div style="margin-left: 8px; font-size: 11px;">• all_positive_ratio</div>
-              <div style="margin-left: 8px; font-size: 11px;">• recent_reviews_count_30d</div>
-            </div>
-            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);">
-              ⚖️ Вес в скоринге: <strong style="color: var(--green);">высокий</strong>
+      // Steam Reviews - показываем только если активен
+      const steamReviewsCoverage = signalsCoverage.steam_reviews || {apps_with_signals: 0, total_apps: 0, pct: 0, active: false};
+      const steamReviewsActive = steamReviewsCoverage.active;
+      const steamReviewsFreshness = signalsFreshness.steam_reviews || {last_captured_at: null, age_minutes: null};
+      
+      if (steamReviewsActive) {
+        html += `
+          <div class="kpi" style="min-height: 200px;" title="Основной количественный источник. Используется для оценки масштаба игры, качества аудитории и фильтрации evergreen-тайтлов.">
+            <div class="label">Steam Reviews</div>
+            <div class="val green">🟢 Активен</div>
+            <div style="font-size: 12px; margin-top: 12px; color: var(--muted);">
+              <div style="margin-bottom: 8px;">📈 Coverage: <strong>${steamReviewsCoverage.pct || 0}%</strong> (${steamReviewsCoverage.apps_with_signals || 0}/${steamReviewsCoverage.total_apps || 0})</div>
+              ${steamReviewsFreshness.last_captured_at ? `<div style="margin-bottom: 8px; font-size: 11px; color: var(--muted);">🕐 Последнее обновление: ${steamReviewsFreshness.last_captured_at}${steamReviewsFreshness.age_minutes !== null ? ` (${steamReviewsFreshness.age_minutes} мин назад)` : ''}</div>` : '<div style="margin-bottom: 8px; font-size: 11px; color: var(--muted);">🕐 Нет данных</div>'}
+              <div style="margin-bottom: 8px;">
+                <div style="font-weight: 600; margin-bottom: 4px;">🎯 Используется в:</div>
+                <div style="margin-left: 8px;">• Emerging Score</div>
+                <div style="margin-left: 8px;">• Evergreen Filter</div>
+              </div>
+              <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);">
+                ⚖️ Вес в скоринге: <strong style="color: var(--green);">высокий</strong>
+              </div>
             </div>
           </div>
-        </div>
-      `;
+        `;
+      }
       
-      // Reddit
-      const redditOk = redditHealth?.status === 'ok';
+      // Steam Store - показываем всегда
+      const steamStoreCoverage = signalsCoverage.steam_store || {apps_with_signals: 0, signals_total: 0, total_apps: 0, pct: 0, active: false};
+      const steamStoreActive = steamStoreCoverage.active;
+      const steamStoreFreshness = signalsFreshness.steam_store || {last_captured_at: null, age_minutes: null};
+      
       html += `
-        <div class="kpi" style="min-height: 200px;" title="Ранний индикатор обсуждений. Часто срабатывает до роста отзывов в Steam.">
-          <div class="label">Reddit</div>
-          <div class="val ${redditOk ? 'green' : 'orange'}">${redditOk ? '🟢 Подключён' : '🟠 Недоступен'}</div>
+        <div class="kpi" style="min-height: 200px;" title="Данные из Steam Store API. Используется для получения метаданных игр.">
+          <div class="label">Steam Store</div>
+          <div class="val ${steamStoreActive ? 'green' : 'orange'}">${steamStoreActive ? '🟢 Есть данные' : '🟠 Нет данных'}</div>
           <div style="font-size: 12px; margin-top: 12px; color: var(--muted);">
-            <div style="margin-bottom: 8px;">📊 Постов сегодня: <strong>N/A</strong></div>
+            <div style="margin-bottom: 8px;">📊 Игр с сигналами: <strong>${steamStoreCoverage.apps_with_signals || 0}</strong></div>
+            <div style="margin-bottom: 8px;">📈 Всего сигналов (24ч): <strong>${steamStoreCoverage.signals_total || 0}</strong></div>
+            <div style="margin-bottom: 8px;">📈 Coverage: <strong>${steamStoreCoverage.pct || 0}%</strong> (${steamStoreCoverage.apps_with_signals || 0}/${steamStoreCoverage.total_apps || 0})</div>
+            ${steamStoreFreshness.last_captured_at ? `
+            <div style="margin-bottom: 8px; font-size: 11px; color: var(--muted);">
+              🕐 Последнее обновление: ${steamStoreFreshness.last_captured_at}
+              ${steamStoreFreshness.age_minutes !== null ? ` (${steamStoreFreshness.age_minutes} мин назад)` : ''}
+            </div>
+            ` : '<div style="margin-bottom: 8px; font-size: 11px; color: var(--muted);">🕐 Нет данных</div>'}
             <div style="margin-bottom: 8px;">
               <div style="font-weight: 600; margin-bottom: 4px;">🎯 Используется в:</div>
-              <div style="margin-left: 8px; color: var(--muted);">• Trend detection (phase 2)</div>
-            </div>
-            <div style="margin-bottom: 8px;">
-              <div style="font-weight: 600; margin-bottom: 4px;">🧠 Тип сигнала:</div>
-              <div style="margin-left: 8px; font-size: 11px;">• ранний социальный интерес</div>
+              <div style="margin-left: 8px;">• Метаданные игр</div>
+              <div style="margin-left: 8px;">• Обогащение данных</div>
             </div>
             <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);">
               ⚖️ Вес в скоринге: <strong style="color: var(--orange);">средний</strong>
@@ -995,24 +1385,63 @@
         </div>
       `;
       
-      // YouTube
-      const youtubeOk = youtubeHealth?.status === 'ok';
+      // Reddit - показываем всегда
+      const redditCoverage = signalsCoverage.reddit || {apps_with_signals: 0, signals_total: 0, total_apps: 0, pct: 0, active: false};
+      const redditActive = redditCoverage.active;
+      const redditFreshness = signalsFreshness.reddit || {last_captured_at: null, age_minutes: null};
+      
+      html += `
+        <div class="kpi" style="min-height: 200px;" title="Ранний индикатор обсуждений. Часто срабатывает до роста отзывов в Steam.">
+          <div class="label">Reddit</div>
+          <div class="val ${redditActive ? 'green' : 'orange'}">${redditActive ? '🟢 Есть данные' : '⏸️ Не участвует'}</div>
+          <div style="font-size: 12px; margin-top: 12px; color: var(--muted);">
+            <div style="margin-bottom: 8px;">📊 Игр с сигналами: <strong>${redditCoverage.apps_with_signals || 0}</strong></div>
+            <div style="margin-bottom: 8px;">📈 Всего сигналов (24ч): <strong>${redditCoverage.signals_total || 0}</strong></div>
+            <div style="margin-bottom: 8px;">📈 Coverage: <strong>${redditCoverage.pct || 0}%</strong> (${redditCoverage.apps_with_signals || 0}/${redditCoverage.total_apps || 0})</div>
+            ${redditFreshness.last_captured_at ? `
+            <div style="margin-bottom: 8px; font-size: 11px; color: var(--muted);">
+              🕐 Последнее обновление: ${redditFreshness.last_captured_at}
+              ${redditFreshness.age_minutes !== null ? ` (${redditFreshness.age_minutes} мин назад)` : ''}
+            </div>
+            ` : '<div style="margin-bottom: 8px; font-size: 11px; color: var(--muted);">🕐 Нет данных</div>'}
+            <div style="margin-bottom: 8px;">
+              <div style="font-weight: 600; margin-bottom: 4px;">🎯 Используется в:</div>
+              <div style="margin-left: 8px; ${!redditActive ? 'color: var(--muted);' : ''}">• Emerging Score (early signal)</div>
+              <div style="margin-left: 8px; ${!redditActive ? 'color: var(--muted);' : ''}">• Stage detection</div>
+            </div>
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);">
+              ⚖️ Вес в скоринге: <strong style="color: ${redditActive ? 'var(--orange)' : 'var(--muted)'};">${redditActive ? 'средний' : 'не используется'}</strong>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      // YouTube - показываем всегда
+      const youtubeCoverage = signalsCoverage.youtube || {apps_with_signals: 0, signals_total: 0, total_apps: 0, pct: 0, active: false};
+      const youtubeActive = youtubeCoverage.active;
+      const youtubeFreshness = signalsFreshness.youtube || {last_captured_at: null, age_minutes: null};
+      
       html += `
         <div class="kpi" style="min-height: 200px;" title="Визуальный индикатор интереса. Показывает появление контента о игре.">
           <div class="label">YouTube</div>
-          <div class="val ${youtubeOk ? 'green' : 'orange'}">${youtubeOk ? '🟢 Подключён' : '🟠 Недоступен'}</div>
+          <div class="val ${youtubeActive ? 'green' : 'orange'}">${youtubeActive ? '🟢 Есть данные' : '⏸️ Не участвует'}</div>
           <div style="font-size: 12px; margin-top: 12px; color: var(--muted);">
-            <div style="margin-bottom: 8px;">📊 Видео сегодня: <strong>N/A</strong></div>
+            <div style="margin-bottom: 8px;">📊 Игр с сигналами: <strong>${youtubeCoverage.apps_with_signals || 0}</strong></div>
+            <div style="margin-bottom: 8px;">📈 Всего сигналов (24ч): <strong>${youtubeCoverage.signals_total || 0}</strong></div>
+            <div style="margin-bottom: 8px;">📈 Coverage: <strong>${youtubeCoverage.pct || 0}%</strong> (${youtubeCoverage.apps_with_signals || 0}/${youtubeCoverage.total_apps || 0})</div>
+            ${youtubeFreshness.last_captured_at ? `
+            <div style="margin-bottom: 8px; font-size: 11px; color: var(--muted);">
+              🕐 Последнее обновление: ${youtubeFreshness.last_captured_at}
+              ${youtubeFreshness.age_minutes !== null ? ` (${youtubeFreshness.age_minutes} мин назад)` : ''}
+            </div>
+            ` : '<div style="margin-bottom: 8px; font-size: 11px; color: var(--muted);">🕐 Нет данных</div>'}
             <div style="margin-bottom: 8px;">
               <div style="font-weight: 600; margin-bottom: 4px;">🎯 Используется в:</div>
-              <div style="margin-left: 8px; color: var(--muted);">• Не используется (пока)</div>
-            </div>
-            <div style="margin-bottom: 8px;">
-              <div style="font-weight: 600; margin-bottom: 4px;">🧠 Тип сигнала:</div>
-              <div style="margin-left: 8px; font-size: 11px;">• медийный интерес</div>
+              <div style="margin-left: 8px; ${!youtubeActive ? 'color: var(--muted);' : ''}">• Emerging Score (momentum)</div>
+              <div style="margin-left: 8px; ${!youtubeActive ? 'color: var(--muted);' : ''}">• Stage detection</div>
             </div>
             <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);">
-              ⚖️ Вес в скоринге: <strong style="color: var(--muted);">низкий (пока)</strong>
+              ⚖️ Вес в скоринге: <strong style="color: ${youtubeActive ? 'var(--orange)' : 'var(--muted)'};">${youtubeActive ? 'средний' : 'не используется'}</strong>
             </div>
           </div>
         </div>
@@ -1039,21 +1468,103 @@
         html += '</tbody></table>';
       }
       
-      // 4. Блок "Влияние источников на Emerging"
+      // Engine v4: События за 24 часа
+      try {
+        const events24h = summary?.events_24h || {};
+        const eventsBySource = events24h.events_by_source || {};
+        const topEvents = events24h.top_events || [];
+        
+        if (Object.keys(eventsBySource).length > 0) {
+          html += '<h3 style="margin-top: 24px; font-size: 20px; margin-bottom: 12px;">📊 События за 24 часа</h3>';
+          html += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;">';
+          
+          Object.entries(eventsBySource).forEach(([source, data]) => {
+            const sourceName = source === 'steam_news' ? 'Steam News' : 
+                              source === 'reddit' ? 'Reddit' : 
+                              source === 'youtube' ? 'YouTube' : source;
+            const matched = data.matched || 0;
+            const unmatched = data.unmatched || 0;
+            const total = matched + unmatched;
+            const matchPct = total > 0 ? Math.round((matched / total) * 100) : 0;
+            
+            html += `
+              <div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 4px; border-left: 3px solid var(--blue);">
+                <div style="font-weight: 600; margin-bottom: 8px;">${sourceName}</div>
+                <div style="font-size: 12px; color: var(--muted);">
+                  <div>Всего: <strong>${total}</strong></div>
+                  <div>Совпадений: <strong style="color: var(--green);">${matched}</strong> (${matchPct}%)</div>
+                  <div>Без совпадений: <strong style="color: var(--orange);">${unmatched}</strong></div>
+                  ${data.last_published_at ? `<div style="margin-top: 4px; font-size: 11px;">Последнее: ${data.last_published_at}</div>` : ''}
+                </div>
+              </div>
+            `;
+          });
+          
+          html += '</div>';
+          
+          // Top 20 событий
+          if (topEvents.length > 0) {
+            html += '<h4 style="margin-top: 16px; font-size: 16px; margin-bottom: 8px;">Топ-20 событий за 24 часа</h4>';
+            html += '<table class="table" style="margin-top: 8px; font-size: 12px;"><thead><tr><th>Источник</th><th>Название</th><th>Игра</th><th>Опубликовано</th><th>Ссылка</th></tr></thead><tbody>';
+            
+            topEvents.slice(0, 20).forEach(ev => {
+              const sourceIcon = ev.source === 'steam_news' ? '📰' : 
+                               ev.source === 'reddit' ? '💬' : 
+                               ev.source === 'youtube' ? '🎥' : '🔗';
+              const gameName = ev.game_name || `App ${ev.steam_app_id || '?'}`;
+              const published = ev.published_at ? new Date(ev.published_at).toLocaleString('ru-RU', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '—';
+              
+              html += `
+                <tr>
+                  <td>${sourceIcon} ${esc(ev.source || '—')}</td>
+                  <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;" title="${esc(ev.title || '—')}">${esc((ev.title || '—').substring(0, 50))}</td>
+                  <td>${esc(gameName)}</td>
+                  <td style="color: var(--muted);">${published}</td>
+                  <td><a href="${esc(ev.url || '#')}" target="_blank" rel="noopener noreferrer" style="color: var(--blue);">🔗</a></td>
+                </tr>
+              `;
+            });
+            
+            html += '</tbody></table>';
+          }
+        }
+      } catch(e) {
+        // Ignore if events_24h doesn't exist yet
+      }
+      
+      // 4. Блок "Влияние источников на Emerging" (Engine v5: реальное влияние на основе компонентов)
+      const influenceData = window.emergingInfluenceData || {};
+      const gamesFound = influenceData.games_found || emergingInfluence.games_found || 0;
       html += `
         <div style="background: rgba(255,193,7,0.1); border-left: 3px solid var(--orange); padding: 16px; margin-top: 24px; border-radius: 4px;">
           <h3 style="margin: 0 0 12px 0; font-size: 18px; color: var(--orange);">🔥 Влияние источников на Emerging (сегодня)</h3>
           <div style="color: var(--text); line-height: 1.8;">
-            <div>🎯 Игр найдено: <strong>${emergingInfluence.games_found || 0}</strong></div>
+            <div>🎯 Игр найдено: <strong>${gamesFound}</strong></div>
             <div>🚫 Отфильтровано как evergreen: <strong>${emergingInfluence.filtered_evergreen || 0}</strong></div>
-            <div style="margin-top: 12px; font-weight: 600;">🧠 По каким сигналам отобраны:</div>
+            ${gamesFound > 0 ? `
+            <div style="margin-top: 12px; font-weight: 600;">🧠 Влияние источников (на основе score_components):</div>
             <div style="margin-left: 16px; margin-top: 8px;">
-              <div>• Steam Reviews: <strong style="color: var(--green);">${emergingInfluence.sources_contribution?.steam_reviews || 0}%</strong></div>
-              <div>• Reddit: <strong style="color: var(--muted);">${emergingInfluence.sources_contribution?.reddit || 0}%</strong> ${emergingInfluence.sources_contribution?.reddit === 0 ? '(пока не участвует)' : ''}</div>
-              <div>• YouTube: <strong style="color: var(--muted);">${emergingInfluence.sources_contribution?.youtube || 0}%</strong> ${emergingInfluence.sources_contribution?.youtube === 0 ? '(пока не участвует)' : ''}</div>
+              <div>• Steam Reviews: <strong style="color: var(--green);">${influenceData.steam_pct || 0}%</strong> (${influenceData.games_with_steam || 0} игр)</div>
+              <div>• Reddit: <strong style="color: ${(influenceData.reddit_pct || 0) > 0 ? 'var(--orange)' : 'var(--muted)'};">${influenceData.reddit_pct || 0}%</strong> (${influenceData.games_with_reddit || 0} игр)</div>
+              <div>• YouTube: <strong style="color: ${(influenceData.youtube_pct || 0) > 0 ? 'var(--orange)' : 'var(--muted)'};">${influenceData.youtube_pct || 0}%</strong> (${influenceData.games_with_youtube || 0} игр)</div>
+              <div style="font-size: 11px; color: var(--muted); margin-top: 6px;">Вычислено на основе reddit_component и youtube_component из score_components</div>
+              ${(influenceData.reddit_pct || 0) === 0 && (influenceData.youtube_pct || 0) === 0 ? `
+              <div style="font-size: 11px; color: var(--orange); margin-top: 6px; font-weight: 600;">
+                ⚠️ Reddit/YouTube не влияют: либо нет данных, либо anti-hype защита снизила влияние
+              </div>
+              ` : ''}
             </div>
+            ` : `
+            <div style="margin-top: 12px; font-weight: 600; color: var(--muted);">📊 Coverage источников (вместо процентов emerging):</div>
+            <div style="margin-left: 16px; margin-top: 8px;">
+              ${signalsCoverage.steam_reviews?.active ? `<div>• Steam Reviews: <strong>${signalsCoverage.steam_reviews.pct || 0}%</strong> coverage</div>` : ''}
+              <div>• Reddit: <strong>${signalsCoverage.reddit?.pct || 0}%</strong> coverage</div>
+              <div>• YouTube: <strong>${signalsCoverage.youtube?.pct || 0}%</strong> coverage</div>
+              <div style="font-size: 11px; color: var(--muted); margin-top: 6px;">Нет emerging игр для анализа вклада</div>
+            </div>
+            `}
             <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1); font-style: italic; color: var(--muted); font-size: 13px;">
-              Мультимодальная система: Steam (confirmation) + Reddit (early) + YouTube (momentum)
+              Engine v5: Контекстное влияние (зависит от lifecycle) + Anti-Hype защита
             </div>
           </div>
         </div>
@@ -1101,12 +1612,25 @@
     try{
       st.textContent = "Загрузка...";
       const health = await jget(`${API}/games/health`).catch(() => null);
-      const rows = await jget(`${API}/games/list?limit=200`).catch(() => []);
+      const gamesResponse = await jget(`${API}/games/list?limit=200`).catch(() => null);
       
-      if(health && Array.isArray(rows)) {
+      // Поддержка нового формата {total, items} и старого формата массива
+      let rows = [];
+      if (gamesResponse) {
+        if (Array.isArray(gamesResponse)) {
+          rows = gamesResponse;
+        } else if (gamesResponse.items && Array.isArray(gamesResponse.items)) {
+          rows = gamesResponse.items;
+        }
+      }
+      
+      if(health && rows.length > 0) {
         gamesAll = rows;
         st.textContent = `OK: ${health.status || 'unknown'}. Игр: ${rows.length}`;
         renderGames();
+      } else if (health) {
+        st.textContent = `OK: ${health.status || 'unknown'}. Игр: 0`;
+        if(list) list.innerHTML = "<div class='status' style='padding: 20px; text-align: center; color: var(--muted);'>Игры не найдены. Запустите сбор данных.</div>";
       } else {
         st.textContent = `Backend не отвечает. Проверь, что сервер запущен.`;
         st.style.color = "rgba(255,107,129,0.85)";
@@ -1146,15 +1670,15 @@
       const name = r.name || r.title || "—";
       const appId = r.steam_app_id || r.source_id || "—";
       const reviews = r.review_count || r.reviews || r.reviews_total || 0;
-      const steamUrl = `https://store.steampowered.com/app/${appId}`;
+      const steamUrl = r.steam_url || `https://store.steampowered.com/app/${appId}/`;
       
       return `
         <div style="padding:12px; border-bottom:1px solid rgba(255,255,255,0.06); display: flex; justify-content: space-between; align-items: center;">
           <div>
-            <a href="${steamUrl}" target="_blank" style="color: var(--blue); text-decoration: none; font-weight: 700; font-size: 16px;">
+            <a href="${esc(steamUrl)}" target="_blank" rel="noopener noreferrer" style="color: var(--blue); text-decoration: underline; text-decoration-color: rgba(110,168,255,0.5); font-weight: 700; font-size: 16px;">
               ${esc(name)}
             </a>
-            <span style="color:rgba(255,255,255,0.6); margin-left: 8px;">#${esc(appId)}</span>
+            <span style="color: var(--muted); font-size: 11px; margin-left: 6px;">(#${esc(String(appId))})</span>
           </div>
           <div style="color:rgba(255,255,255,0.6);">
             Отзывов: ${reviews}
@@ -1171,6 +1695,68 @@
       ch.classList.add("active");
       gamesFilter = ch.dataset.gamesFilter || "all";
       renderGames();
+    });
+  });
+  
+  // Фильтры для трендов (Lifecycle Intelligence v5)
+  let trendsLifecycleFilter = "all";
+  let trendsConfidenceFilter = "all";
+  
+  function applyTrendsFilters() {
+    const table = qs("#trends-emerging-table table tbody");
+    if (!table) return;
+    
+    const rows = Array.from(table.querySelectorAll("tr"));
+    rows.forEach(row => {
+      let show = true;
+      
+      // Фильтр по жизненному циклу
+      if (trendsLifecycleFilter !== "all") {
+        const lifecycleCell = row.querySelector("td:nth-child(7)");
+        if (lifecycleCell) {
+          const lifecycleText = lifecycleCell.textContent || "";
+          const lifecycleRaw = row.dataset.lifecycleStage || "";
+          if (trendsLifecycleFilter !== lifecycleRaw && !lifecycleText.includes(trendsLifecycleFilter)) {
+            show = false;
+          }
+        }
+      }
+      
+      // Фильтр по confidence
+      if (trendsConfidenceFilter === "high") {
+        const confidenceCell = row.querySelector("td:nth-child(5)");
+        if (confidenceCell) {
+          const confidenceText = confidenceCell.textContent || "";
+          if (!confidenceText.includes("Высокая")) {
+            show = false;
+          }
+        }
+      }
+      
+      row.style.display = show ? "" : "none";
+    });
+  }
+  
+  qsa("#trends-filters .chip[data-filter-lifecycle]").forEach(ch => {
+    ch.addEventListener("click", () => {
+      qsa("#trends-filters .chip[data-filter-lifecycle]").forEach(x => x.classList.remove("active"));
+      ch.classList.add("active");
+      trendsLifecycleFilter = ch.dataset.filterLifecycle || "all";
+      applyTrendsFilters();
+    });
+  });
+  
+  qsa("#trends-filters .chip[data-filter-confidence]").forEach(ch => {
+    ch.addEventListener("click", () => {
+      const wasActive = ch.classList.contains("active");
+      qsa("#trends-filters .chip[data-filter-confidence]").forEach(x => x.classList.remove("active"));
+      if (!wasActive) {
+        ch.classList.add("active");
+        trendsConfidenceFilter = ch.dataset.filterConfidence || "all";
+      } else {
+        trendsConfidenceFilter = "all";
+      }
+      applyTrendsFilters();
     });
   });
 
@@ -1791,8 +2377,8 @@
   // ==========================================
   // Стартовая загрузка
   // ==========================================
-  // По умолчанию грузим систему (Dev-вкладка)
-  loadSystem();
+  // Инициализация уже выполнена в initializeDashboard()
+  // loadSystem() будет вызван через switchTab() при активации вкладки "system"
     </script>
   </div> <!-- wrap -->
 </body>

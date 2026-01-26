@@ -49,7 +49,25 @@ def dashboard():
     
     try:
         with open(dashboard_path, "r", encoding="utf-8") as f:
-            return f.read()
+            content = f.read()
+            # Добавляем версионирование для обхода кэша браузера
+            # Заменяем в HTML ссылки на статические файлы с версией
+            import hashlib
+            version_hash = hashlib.md5(content.encode()).hexdigest()[:8]
+            # Добавляем meta-тег для версионирования
+            if '<head>' in content:
+                content = content.replace(
+                    '<head>',
+                    f'<head>\n  <meta name="dashboard-version" content="{version_hash}">'
+                )
+            return HTMLResponse(
+                content=content,
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0"
+                }
+            )
     except FileNotFoundError:
         return HTMLResponse(
             content=f"<h1>Error</h1><p>Dashboard file not found at: {dashboard_path}</p>",
