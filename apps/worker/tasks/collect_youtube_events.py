@@ -3,7 +3,6 @@ Collect YouTube videos as raw events in trends_raw_events.
 This is the proper pipeline: Collect → Events → Matching → Signals.
 """
 import logging
-import os
 from datetime import datetime, date
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -11,6 +10,7 @@ import json
 
 from apps.worker.celery_app import celery_app
 from apps.db.session import get_db_session
+from apps.worker.config.external_apis import YOUTUBE_API_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +31,12 @@ def collect_youtube_events_task(query_set='indie_radar', max_per_query=25):
     events_collected = 0
     
     try:
-        api_key = os.getenv('YOUTUBE_API_KEY')
-        if not api_key:
+        if not YOUTUBE_API_KEY:
             logger.warning("YOUTUBE_API_KEY not set, skipping YouTube collection")
             return {"status": "error", "error": "YOUTUBE_API_KEY not configured"}
         
         from apps.worker.integrations.youtube_client import YouTubeClient
-        client = YouTubeClient(api_key)
+        client = YouTubeClient(YOUTUBE_API_KEY)
         
         queries = QUERY_SETS.get(query_set, QUERY_SETS['indie_radar'])
         
@@ -119,8 +118,7 @@ def collect_youtube_events_for_apps(db: Session, app_ids: list = None, max_per_a
     events_collected = 0
     
     try:
-        api_key = os.getenv('YOUTUBE_API_KEY')
-        if not api_key:
+        if not YOUTUBE_API_KEY:
             return {"status": "error", "error": "YOUTUBE_API_KEY not configured"}
         
         # Get game names for apps
@@ -142,7 +140,7 @@ def collect_youtube_events_for_apps(db: Session, app_ids: list = None, max_per_a
             games = db.execute(query).mappings().all()
         
         from apps.worker.integrations.youtube_client import YouTubeClient
-        client = YouTubeClient(api_key)
+        client = YouTubeClient(YOUTUBE_API_KEY)
         
         for game in games:
             game_name = game["name"]

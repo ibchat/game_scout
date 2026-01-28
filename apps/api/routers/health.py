@@ -21,3 +21,4 @@ async def health_check(db: Session = Depends(get_db_session)):
         "database": db_status,
         "service": "game_scout_api"
     }
+

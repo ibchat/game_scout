@@ -20,3 +20,22 @@ backups/
 # IDE
 .vscode/
 .idea/
+
+# Temporary reports and dumps
+*_SUMMARY*.md
+*_REPORT*.md
+*_STATUS*.md
+*_FIXES*.md
+*_DEBUG*.md
+*_IMPLEMENTATION*.md
+*_TZ*.md
+*_VERIFY*.md
+*_INSTRUCTIONS*.md
+*_CONTRACT*.md
+*_DEPLOYMENT*.md
+*_PLAN*.md
+CHECK_LOGS.md
+IMMEDIATE_FIX_COMMANDS.md
+URGENT_FIXES.md
+CRITICAL_FIXES_CHECKLIST.md
+CRITICAL_FIXES_SUMMARY.md

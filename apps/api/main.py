@@ -1,6 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException, Header, Query
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
+from starlette.middleware.base import BaseHTTPMiddleware
+import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 # импортируем модули роутеров
 from apps.api.routers import (
@@ -16,6 +21,7 @@ from apps.api.routers import (
     reddit,
     yearly,
     system_admin,
+    deals_v1,
 )
 
 # relaunch может быть новым модулем — импорт отдельно,
@@ -24,6 +30,50 @@ from apps.api.routers import relaunch
 
 
 app = FastAPI(title="Game Scout API", version="0.1.0")
+
+
+# ============================================================
+# Public Tunnel Token Protection Middleware
+# ============================================================
+
+class PublicTunnelTokenMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware для защиты публичного туннеля токеном.
+    Проверяет X-Demo-Token header или ?token= query parameter.
+    """
+    
+    async def dispatch(self, request: Request, call_next):
+        # Check if tunnel is enabled and token is set
+        enable_tunnel = os.getenv("ENABLE_PUBLIC_TUNNEL", "0") == "1"
+        demo_token = os.getenv("PUBLIC_DEMO_TOKEN", "").strip()
+        
+        # Skip protection if tunnel is disabled or token is not set
+        if not enable_tunnel or not demo_token:
+            return await call_next(request)
+        
+        # Skip protection for health check and root endpoints
+        if request.url.path in ["/", "/health", "/api/v1/health"]:
+            return await call_next(request)
+        
+        # Get token from header or query parameter
+        token_header = request.headers.get("X-Demo-Token", "")
+        token_query = request.query_params.get("token", "")
+        provided_token = token_header or token_query
+        
+        # Check token
+        if provided_token != demo_token:
+            logger.warning(f"Invalid demo token attempt from {request.client.host} to {request.url.path}")
+            return Response(
+                content='{"detail":"Invalid or missing demo token"}',
+                status_code=401,
+                media_type="application/json"
+            )
+        
+        return await call_next(request)
+
+
+# Apply middleware
+app.add_middleware(PublicTunnelTokenMiddleware)
 
 # ============================================================
 # Static + Dashboard
@@ -88,6 +138,7 @@ API_V1 = "/api/v1"
 
 # Неформатированные (старые) роуты
 app.include_router(health.router, prefix="")
+app.include_router(health.router, prefix=API_V1)  # Также доступен по /api/v1/health
 app.include_router(pitches.router, prefix="/pitches")
 app.include_router(trends.router, prefix="/trends")
 
@@ -100,6 +151,7 @@ app.include_router(reddit.router, prefix=API_V1)
 app.include_router(yearly.router, prefix=API_V1)
 app.include_router(trends_v1.router, prefix=API_V1)
 app.include_router(system_admin.router, prefix=API_V1)
+app.include_router(deals_v1.router, prefix=API_V1)
 
 # ✅ ВАЖНО: relaunch подключаем ТОЛЬКО к /api/v1
 # а prefix="/relaunch" задается ВНУТРИ relaunch.py

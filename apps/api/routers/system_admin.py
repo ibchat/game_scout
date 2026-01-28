@@ -101,9 +101,12 @@ async def get_system_summary(
         trends_today["daily_updated_today"] = daily_updated
         
         # Reviews updated today (сколько игр обновлено в steam_review_daily сегодня)
+        from apps.worker.analysis.db_introspection import detect_steam_review_app_id_column
+        app_id_col = detect_steam_review_app_id_column(db)
+        
         reviews_updated = db.execute(
-            text("""
-                SELECT COUNT(DISTINCT steam_app_id)::int
+            text(f"""
+                SELECT COUNT(DISTINCT {app_id_col})::int
                 FROM steam_review_daily
                 WHERE day = :today
             """),
@@ -204,14 +207,19 @@ async def get_system_summary(
     signals_freshness = {}
     
     try:
+        from apps.worker.analysis.db_introspection import detect_steam_review_app_id_column
+        
         today = date.today()
         total_seed_apps = trends_today.get("seed_apps", 0)
+        
+        # Определяем реальное имя колонки app_id в steam_review_daily
+        app_id_col = detect_steam_review_app_id_column(db)
     
         # Steam Reviews coverage - из steam_review_daily (единственный реальный источник)
         steam_stats = db.execute(
-            text("""
+            text(f"""
                 SELECT 
-                    COUNT(DISTINCT steam_app_id)::int as games_with_data,
+                    COUNT(DISTINCT {app_id_col})::int as games_with_data,
                     COUNT(*)::int as total_records,
                     MAX(computed_at) as last_computed_at
                 FROM steam_review_daily
@@ -234,7 +242,7 @@ async def get_system_summary(
         }
         signals_freshness["steam_reviews"] = {
             "last_captured_at": steam_last_computed.isoformat() if steam_last_computed else None,
-            "age_minutes": int((datetime.now() - steam_last_computed.replace(tzinfo=None)).total_seconds() / 60) if steam_last_computed and hasattr(steam_last_computed, 'replace') else None
+            "age_minutes": int((datetime.utcnow() - steam_last_computed.replace(tzinfo=None)).total_seconds() / 60) if steam_last_computed and hasattr(steam_last_computed, 'replace') else None
         }
         
         # Reddit / YouTube - не участвуют (нет данных)
@@ -345,13 +353,16 @@ async def get_system_summary(
         })
         
         # Check for missing Steam data
+        from apps.worker.analysis.db_introspection import detect_steam_review_app_id_column
+        app_id_col_missing = detect_steam_review_app_id_column(db)
+        
         missing_steam_data = db.execute(
-            text("""
+            text(f"""
                 SELECT COUNT(DISTINCT s.steam_app_id)::int
                 FROM trends_seed_apps s
-                LEFT JOIN steam_review_daily srd ON srd.steam_app_id = s.steam_app_id
+                LEFT JOIN steam_review_daily srd ON srd.{app_id_col_missing} = s.steam_app_id
                   AND srd.day = (
-                      SELECT MAX(day) FROM steam_review_daily WHERE steam_app_id = s.steam_app_id
+                      SELECT MAX(day) FROM steam_review_daily WHERE {app_id_col_missing} = s.steam_app_id
                   )
                 WHERE s.is_active = true
                   AND srd.all_reviews_count IS NULL
@@ -628,6 +639,100 @@ async def get_system_summary(
         diagnostics["filtered_evergreen_giants"] = 0
     
     result["diagnostics"] = diagnostics
+    
+    # Public Tunnel URL
+    try:
+        import os
+        from pathlib import Path
+        from datetime import datetime
+        
+        # Check if PUBLIC_TUNNEL_URL is set in environment
+        env_url = os.getenv("PUBLIC_TUNNEL_URL", "").strip()
+        if env_url:
+            result["public_tunnel"] = {
+                "enabled": True,
+                "provider": os.getenv("PUBLIC_TUNNEL_PROVIDER", "manual"),
+                "public_url": env_url,
+                "dashboard_url": f"{env_url}/dashboard",
+                "source": "env",
+                "has_token_protection": bool(os.getenv("PUBLIC_DEMO_TOKEN", "").strip())
+            }
+        else:
+            # Check if tunnel is enabled
+            enable_tunnel = os.getenv("ENABLE_PUBLIC_TUNNEL", "0") == "1"
+            if enable_tunnel:
+                # Try to read from runtime file
+                runtime_file = Path(".runtime/public_tunnel_url.txt")
+                if runtime_file.exists():
+                    try:
+                        url = runtime_file.read_text().strip()
+                        if url:
+                            # Get provider from environment or detect from URL
+                            provider = os.getenv("PUBLIC_TUNNEL_PROVIDER", "unknown")
+                            if "ngrok" in url:
+                                provider = "ngrok"
+                            elif "trycloudflare.com" in url:
+                                provider = "cloudflare"
+                            
+                            result["public_tunnel"] = {
+                                "enabled": True,
+                                "provider": provider,
+                                "public_url": url,
+                                "dashboard_url": f"{url}/dashboard",
+                                "source": "runtime_file",
+                                "has_token_protection": bool(os.getenv("PUBLIC_DEMO_TOKEN", "").strip())
+                            }
+                        else:
+                            result["public_tunnel"] = {
+                                "enabled": False,
+                                "provider": None,
+                                "public_url": None,
+                                "dashboard_url": None,
+                                "source": "none",
+                                "has_token_protection": False,
+                                "message": "Tunnel enabled but URL not found. Run: bash scripts/start_tunnel.sh"
+                            }
+                    except Exception as e:
+                        logger.warning(f"Failed to read tunnel URL file: {e}")
+                        result["public_tunnel"] = {
+                            "enabled": False,
+                            "provider": None,
+                            "public_url": None,
+                            "dashboard_url": None,
+                            "source": "error",
+                            "has_token_protection": False,
+                            "error": str(e)
+                        }
+                else:
+                    result["public_tunnel"] = {
+                        "enabled": False,
+                        "provider": None,
+                        "public_url": None,
+                        "dashboard_url": None,
+                        "source": "none",
+                        "has_token_protection": False,
+                        "message": "Tunnel enabled but not started. Run: bash scripts/start_tunnel.sh"
+                    }
+            else:
+                result["public_tunnel"] = {
+                    "enabled": False,
+                    "provider": None,
+                    "public_url": None,
+                    "dashboard_url": None,
+                    "source": "none",
+                    "has_token_protection": False
+                }
+    except Exception as e:
+        logger.warning(f"Failed to get public tunnel info: {e}")
+        result["public_tunnel"] = {
+            "enabled": False,
+            "provider": None,
+            "public_url": None,
+            "dashboard_url": None,
+            "source": "error",
+            "has_token_protection": False,
+            "error": str(e)
+        }
     
     return result
 
@@ -967,3 +1072,74 @@ async def get_events_24h(
     except Exception as e:
         logger.error(f"Failed to get events_24h: {e}", exc_info=True)
         return {"events_by_source": {}, "top_events": []}
+
+
+@router.get("/public_url")
+async def get_public_url() -> Dict[str, Any]:
+    """
+    Get public tunnel URL for mobile access.
+    Returns URL from environment variable or runtime file.
+    """
+    import os
+    from pathlib import Path
+    from datetime import datetime
+    
+    # Check if PUBLIC_TUNNEL_URL is set in environment
+    env_url = os.getenv("PUBLIC_TUNNEL_URL", "").strip()
+    if env_url:
+        return {
+            "enabled": True,
+            "provider": os.getenv("PUBLIC_TUNNEL_PROVIDER", "manual"),
+            "public_url": env_url,
+            "dashboard_url": f"{env_url}/dashboard",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "source": "env"
+        }
+    
+    # Check if tunnel is enabled
+    enable_tunnel = os.getenv("ENABLE_PUBLIC_TUNNEL", "0") == "1"
+    if not enable_tunnel:
+        return {
+            "enabled": False,
+            "provider": None,
+            "public_url": None,
+            "dashboard_url": None,
+            "updated_at": None,
+            "source": "none"
+        }
+    
+    # Try to read from runtime file
+    runtime_file = Path(".runtime/public_tunnel_url.txt")
+    if runtime_file.exists():
+        try:
+            url = runtime_file.read_text().strip()
+            if url:
+                # Get provider from environment or detect from URL
+                provider = os.getenv("PUBLIC_TUNNEL_PROVIDER", "unknown")
+                if "ngrok" in url:
+                    provider = "ngrok"
+                elif "trycloudflare.com" in url:
+                    provider = "cloudflare"
+                
+                # Get file modification time
+                mtime = datetime.fromtimestamp(runtime_file.stat().st_mtime)
+                
+                return {
+                    "enabled": True,
+                    "provider": provider,
+                    "public_url": url,
+                    "dashboard_url": f"{url}/dashboard",
+                    "updated_at": mtime.isoformat() + "Z",
+                    "source": "runtime_file"
+                }
+        except Exception as e:
+            logger.warning(f"Failed to read tunnel URL file: {e}")
+    
+    return {
+        "enabled": False,
+        "provider": None,
+        "public_url": None,
+        "dashboard_url": None,
+        "updated_at": None,
+        "source": "none"
+    }

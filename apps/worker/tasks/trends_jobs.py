@@ -389,7 +389,7 @@ def process_trend_jobs_once(db, limit: int = 10) -> Dict[str, Any]:
 def process_trend_jobs_loop(max_iterations: Optional[int] = None, sleep_seconds: float = 2.0):
     """
     Continuous loop to process trend_jobs.
-    Stops when no jobs remain or max_iterations reached.
+    Runs indefinitely (unless max_iterations is set) to keep the service alive.
     """
     # Запускаем heartbeat в отдельном потоке
     heartbeat_thread = threading.Thread(
@@ -410,17 +410,17 @@ def process_trend_jobs_loop(max_iterations: Optional[int] = None, sleep_seconds:
         try:
             result = process_trend_jobs_once(db, limit=10)
             
-            if result["processed"] == 0:
-                logger.debug("trends_jobs_no_more_jobs")
-                break
-            
-            logger.info(f"trends_jobs_batch processed={result['processed']} success={result['success']} failed={result['failed']}")
+            if result["processed"] > 0:
+                logger.info(f"trends_jobs_batch processed={result['processed']} success={result['success']} failed={result['failed']}")
+            else:
+                logger.debug("trends_jobs_no_more_jobs (sleeping)")
             
             iteration += 1
             time.sleep(sleep_seconds)
             
         except Exception as e:
             logger.error(f"trends_jobs_loop_error iteration={iteration} error={e}", exc_info=True)
+            time.sleep(sleep_seconds)  # Sleep even on error to avoid tight loop
         finally:
             db.close()
     

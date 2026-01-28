@@ -4,7 +4,8 @@ from apps.db.models_youtube import YouTubeTrendVideo
 from sqlalchemy import text
 from datetime import datetime
 import logging
-import os
+
+from apps.worker.config.external_apis import YOUTUBE_API_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,8 @@ QUERY_SETS = {
 
 @celery_app.task(name="collect_youtube_trends")
 def collect_youtube_trend_videos_task(query_set='indie_radar', max_per_query=25):
+    return {"status": "disabled", "reason": "Temporarily disabled: SQLAlchemy mapper error GameNarrativeAnalysis->Game (fix later)"}
+    
     db = get_db_session()
     history_id = None
     try:
@@ -27,9 +30,8 @@ def collect_youtube_trend_videos_task(query_set='indie_radar', max_per_query=25)
         history_id = result.fetchone()[0]
         db.commit()
         
-        api_key = os.getenv('YOUTUBE_API_KEY')
         from apps.worker.integrations.youtube_client import YouTubeClient
-        client = YouTubeClient(api_key)
+        client = YouTubeClient(YOUTUBE_API_KEY)
         
         queries = QUERY_SETS.get(query_set, QUERY_SETS['indie_radar'])
         total_videos = 0
@@ -75,7 +77,7 @@ def collect_youtube_trend_videos_task(query_set='indie_radar', max_per_query=25)
         db.commit()
         
         logger.info(f"✅ Successfully collected {total_videos} YouTube videos")
-        mode = "real" if api_key else "mock"
+        mode = "real" if YOUTUBE_API_KEY else "mock"
         return {"status": "success", "videos": total_videos, "mode": mode}
         
     except Exception as e:

@@ -56,10 +56,9 @@ def morning_scan_task(self, run_id: str, params: dict):
 def youtube_trend_radar_stage(run_id, params, db):
     """NEW: YouTube Trend Radar - собирает видео, комменты, генерит queries"""
     from apps.worker.celery_app import celery_app
-    import os
+    from apps.worker.config.external_apis import YOUTUBE_API_KEY
     
-    api_key = os.getenv('YOUTUBE_API_KEY')
-    if not api_key:
+    if not YOUTUBE_API_KEY:
         logger.warning("YouTube API key not configured, skipping trend radar")
         return {"status": "skipped"}
     

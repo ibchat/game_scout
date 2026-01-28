@@ -12,6 +12,8 @@ QUERY_SETS = {
 
 @celery_app.task(name="collect_reddit_trends")
 def collect_reddit_trends_task(query_set='indie_radar', max_per_query=50):
+    return {"status": "disabled", "reason": "Temporarily disabled: SQLAlchemy mapper error GameNarrativeAnalysis->Game (fix later)"}
+    
     db = get_db_session()
     history_id = None
     try:

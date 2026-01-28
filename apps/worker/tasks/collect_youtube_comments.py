@@ -3,7 +3,8 @@ from apps.db.session import get_db_session
 from apps.db.models_youtube import YouTubeTrendVideo
 from apps.db.models_investor import ExternalCommentSample
 import logging
-import os
+
+from apps.worker.config.external_apis import YOUTUBE_API_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -11,8 +12,7 @@ logger = logging.getLogger(__name__)
 def collect_youtube_trend_comments_task(top_n=20, comments_per_video=50):
     db = get_db_session()
     try:
-        api_key = os.getenv('YOUTUBE_API_KEY')
-        if not api_key:
+        if not YOUTUBE_API_KEY:
             return {"status": "skipped", "reason": "no_api_key"}
         
         videos = db.query(YouTubeTrendVideo).order_by(
@@ -20,7 +20,7 @@ def collect_youtube_trend_comments_task(top_n=20, comments_per_video=50):
         ).limit(top_n).all()
         
         from apps.worker.integrations.youtube_client import YouTubeClient
-        client = YouTubeClient(api_key)
+        client = YouTubeClient(YOUTUBE_API_KEY)
         
         # Нужно найти соответствующие external_videos
         from apps.db.models_investor import ExternalVideo

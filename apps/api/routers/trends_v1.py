@@ -546,15 +546,22 @@ async def get_emerging_games(
     """
     try:
         from apps.worker.analysis.emerging_engine_v4 import analyze_emerging
+        from apps.worker.analysis.db_introspection import detect_steam_review_app_id_column
+        
+        # Определяем реальное имя колонки app_id в steam_review_daily
+        # Используем Session напрямую (SQLAlchemy 2.0)
+        app_id_col = detect_steam_review_app_id_column(db)
         
         # SQL запрос: только steam_review_daily и steam_app_cache
-        query = text("""
+        # Используем detected column с alias app_id
+        query = text(f"""
         SELECT 
             seed.steam_app_id,
             srd.all_reviews_count,
             srd.recent_reviews_count_30d,
             srd.all_positive_percent,
             srd.day,
+            srd.{app_id_col} as app_id,
             -- Game name: prefer cache.name (most reliable), fallback to facts.name
             COALESCE(
                 NULLIF(c.name, ''),
@@ -568,9 +575,9 @@ async def get_emerging_games(
             ) as steam_url,
             f.release_date
         FROM trends_seed_apps seed
-        LEFT JOIN steam_review_daily srd ON srd.steam_app_id = seed.steam_app_id
+        LEFT JOIN steam_review_daily srd ON srd.{app_id_col} = seed.steam_app_id
             AND srd.day = (
-                SELECT MAX(day) FROM steam_review_daily WHERE steam_app_id = seed.steam_app_id
+                SELECT MAX(day) FROM steam_review_daily WHERE {app_id_col} = seed.steam_app_id
             )
         LEFT JOIN steam_app_facts f ON f.steam_app_id = seed.steam_app_id
         LEFT JOIN steam_app_cache c ON c.steam_app_id = seed.steam_app_id::bigint
@@ -609,7 +616,15 @@ async def get_emerging_games(
                 
                 # Фильтруем по min_score и passed_filters
                 if result["passed_filters"] and result["emerging_score"] >= min_score:
-                    emerging_games.append(result)
+                    # Форматируем для API ответа (только нужные поля)
+                    emerging_games.append({
+                        "app_id": result.get("app_id") or result.get("steam_app_id"),
+                        "name": result.get("name") or row.get("game_name") or f"App {result.get('app_id') or result.get('steam_app_id')}",
+                        "recent_reviews_30d": result.get("recent_reviews_30d", 0),
+                        "positive_ratio": result.get("positive_ratio", 0.0),
+                        "emerging_score": result.get("emerging_score", 0.0),
+                        "verdict": result.get("verdict", "Неизвестно")
+                    })
                     
             except Exception as e:
                 logger.error(f"Error analyzing game {row.get('steam_app_id')}: {e}", exc_info=True)
@@ -648,11 +663,37 @@ async def get_emerging_diagnostics(
     Показывает ПОЧЕМУ emerging = 0, если это так.
     Использует реальные фильтры v4.
     """
-    from apps.worker.analysis.emerging_engine_v4 import analyze_emerging
+    from apps.worker.analysis.emerging_engine_v4 import analyze_emerging, MIN_RECENT_REVIEWS_30D, MIN_POSITIVE_RATIO, EMERGING_SCORE_THRESHOLD
+    from apps.worker.analysis.db_introspection import detect_steam_review_app_id_column
+    from datetime import date
     
     try:
+        # Определяем реальное имя колонки app_id в steam_review_daily
+        # Используем Session напрямую (SQLAlchemy 2.0)
+        app_id_col = detect_steam_review_app_id_column(db)
+        
+        # Получаем coverage метрики
+        coverage_query = text(f"""
+            SELECT 
+                COUNT(DISTINCT seed.steam_app_id) as total_seed_apps,
+                COUNT(DISTINCT CASE WHEN srd.{app_id_col} IS NOT NULL THEN seed.steam_app_id END) as seed_with_any_reviews,
+                MIN(srd.day) as min_day,
+                MAX(srd.day) as max_day
+            FROM trends_seed_apps seed
+            LEFT JOIN steam_review_daily srd ON srd.{app_id_col} = seed.steam_app_id
+            WHERE seed.is_active = true
+        """)
+        
+        coverage_result = db.execute(coverage_query).mappings().first()
+        total_seed_apps = coverage_result["total_seed_apps"] or 0
+        seed_with_any_reviews = coverage_result["seed_with_any_reviews"] or 0
+        min_day = coverage_result["min_day"]
+        max_day = coverage_result["max_day"]
+        
+        coverage_reviews_pct = round((seed_with_any_reviews / total_seed_apps * 100) if total_seed_apps > 0 else 0, 1)
+        
         # Получаем все seed apps с данными из steam_review_daily
-        query = text("""
+        query = text(f"""
             SELECT 
                 seed.steam_app_id,
                 srd.all_reviews_count,
@@ -669,9 +710,9 @@ async def get_emerging_diagnostics(
                     'https://store.steampowered.com/app/' || seed.steam_app_id::text || '/'
                 ) as steam_url
             FROM trends_seed_apps seed
-            LEFT JOIN steam_review_daily srd ON srd.steam_app_id = seed.steam_app_id
+            LEFT JOIN steam_review_daily srd ON srd.{app_id_col} = seed.steam_app_id
                 AND srd.day = (
-                    SELECT MAX(day) FROM steam_review_daily WHERE steam_app_id = seed.steam_app_id
+                    SELECT MAX(day) FROM steam_review_daily WHERE {app_id_col} = seed.steam_app_id
                 )
             LEFT JOIN steam_app_facts f ON f.steam_app_id = seed.steam_app_id
             LEFT JOIN steam_app_cache c ON c.steam_app_id = seed.steam_app_id::bigint
@@ -682,12 +723,23 @@ async def get_emerging_diagnostics(
         rows = db.execute(query).mappings().all()
         
         # Счётчики фильтров (реальные фильтры v4)
-        total_seed_apps = len(rows)
         passed_growth = 0
         passed_quality = 0
         filtered_evergreen = 0
         below_score_threshold = 0
         emerging_final = 0
+        
+        # Reasons breakdown
+        reasons = {
+            "no_data": 0,
+            "below_growth": 0,
+            "low_quality": 0,
+            "evergreen": 0,
+            "below_score": 0
+        }
+        
+        # Top near misses (игры близкие к emerging)
+        near_misses = []
         
         for row in rows:
             app_row = {
@@ -703,31 +755,69 @@ async def get_emerging_diagnostics(
             try:
                 result = analyze_emerging(app_row)
                 filter_results = result.get("filter_results", {})
+                emerging_score = result.get("emerging_score", 0.0)
                 
-                # Подсчитываем прохождение фильтров
-                if filter_results.get("growth"):
+                # Подсчитываем прохождение фильтров (строго последовательно)
+                if not filter_results.get("growth"):
+                    reasons["below_growth"] += 1
+                    if row["recent_reviews_count_30d"] is None:
+                        reasons["no_data"] += 1
+                else:
                     passed_growth += 1
-                if filter_results.get("quality"):
-                    passed_quality += 1
-                if filter_results.get("evergreen"):
-                    filtered_evergreen += 1
-                if filter_results.get("score"):
-                    emerging_final += 1
-                elif filter_results.get("growth") and filter_results.get("quality") and not filter_results.get("evergreen"):
-                    below_score_threshold += 1
+                    # Quality считается только для тех, кто прошёл Growth
+                    if not filter_results.get("quality"):
+                        reasons["low_quality"] += 1
+                    else:
+                        passed_quality += 1
+                        # Evergreen проверяется только для тех, кто прошёл Growth + Quality
+                        if filter_results.get("evergreen"):
+                            filtered_evergreen += 1
+                            reasons["evergreen"] += 1
+                        else:
+                            # Не evergreen, проверяем score
+                            if filter_results.get("score"):
+                                emerging_final += 1
+                            else:
+                                # Прошли Growth + Quality, но не прошли Score
+                                below_score_threshold += 1
+                                reasons["below_score"] += 1
+                                
+                                # Добавляем в near misses если score близок к порогу
+                                if emerging_score >= 1.0 and emerging_score < EMERGING_SCORE_THRESHOLD:
+                                    near_misses.append({
+                                        "app_id": row["steam_app_id"],
+                                        "name": row.get("game_name") or f"App {row['steam_app_id']}",
+                                        "score": round(emerging_score, 2),
+                                        "why": result.get("verdict", "Below score threshold")
+                                    })
                     
             except Exception as e:
                 logger.warning(f"Failed to analyze game {row.get('steam_app_id')} for diagnostics: {e}")
+                reasons["no_data"] += 1
                 continue
+        
+        # Сортируем near misses по score
+        near_misses.sort(key=lambda x: x["score"], reverse=True)
         
         return {
             "status": "ok",
             "total_seed_apps": total_seed_apps,
+            "seed_with_any_reviews": seed_with_any_reviews,
+            "coverage_reviews_pct": coverage_reviews_pct,
+            "min_day": min_day.isoformat() if min_day else None,
+            "max_day": max_day.isoformat() if max_day else None,
             "passed_growth": passed_growth,
             "passed_quality": passed_quality,
             "filtered_evergreen": filtered_evergreen,
             "below_score_threshold": below_score_threshold,
-            "emerging_final": emerging_final
+            "emerging_final": emerging_final,
+            "reasons": reasons,
+            "thresholds": {
+                "min_recent_reviews_30d": MIN_RECENT_REVIEWS_30D,
+                "min_positive_ratio": MIN_POSITIVE_RATIO,
+                "emerging_score_threshold": EMERGING_SCORE_THRESHOLD
+            },
+            "top_near_misses": near_misses[:10]  # Топ-10 близких к emerging
         }
         
     except Exception as e:

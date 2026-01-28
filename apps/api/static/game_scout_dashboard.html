@@ -276,6 +276,7 @@
     <div class="tabs" id="tabs">
       <div class="tab active" data-tab="system" title="Общее состояние системы и жизнеспособность пайплайна данных">📊 Система</div>
       <div class="tab" data-tab="trends" title="Игры с аномальным ростом интереса и потенциальной инвестиционной привлекательностью">🔥 Тренды</div>
+      <div class="tab" data-tab="deals" title="Определение намерений издателей и качество игр для сделок">💼 Deals</div>
       <div class="tab" data-tab="sources" title="Источники внешних сигналов, используемых для оценки интереса к играм">🧠 Источники данных</div>
       <div class="tab" data-tab="games" title="Полный список игр, известных системе">🗂 База игр</div>
       <div class="tab" data-tab="relaunch" title="Анализ потенциала перезапуска существующих игр">🚀 Relaunch Scout</div>
@@ -291,6 +292,12 @@
       
       <!-- Статус компонентов -->
       <div class="cards" id="system-status-cards"></div>
+      
+      <!-- Public Demo URL -->
+      <h3 style="margin-top: 24px; font-size: 20px;">Public Demo URL</h3>
+      <div class="status" id="public-tunnel-info" style="padding: 16px; background: rgba(0,0,0,0.2); border-radius: 12px;">
+        Загрузка…
+      </div>
       
       <!-- Счетчики Trends Pipeline -->
       <h3 style="margin-top: 24px; font-size: 20px;">Тренды (сегодня)</h3>
@@ -331,7 +338,51 @@
       <div id="trends-emerging-table"></div>
       
       <div class="small" style="margin-top: 12px;">
-        API: <code>/api/v1/admin/system/summary</code>, <code>/api/v1/trends/games/emerging</code>
+        API: <code>/api/v1/admin/system/summary</code>, <code>/api/v1/trends/emerging</code> (Engine v4 Final)
+      </div>
+    </section>
+
+        <!-- Deals -->
+    <section class="panel hidden" id="panel-deals">
+      <h2>💼 Сделки / Намерение издательства</h2>
+      <div class="status" style="color: rgba(255,255,255,0.82); margin-bottom: 18px;">
+        Игры с признаками поиска издателя/инвестиций. Отдельный слой, не зависит от Emerging/Trends.
+      </div>
+      
+      <!-- Статистика -->
+      <div class="cards" id="deals-stats-cards"></div>
+      
+      <!-- Фильтры -->
+      <div class="row" style="margin-top: 18px;">
+        <div class="group">
+          <label style="color: var(--muted); font-size: 13px;">Мин. намерение:</label>
+          <input type="number" id="deals-filter-intent" class="mini" value="0" min="0" max="100" style="max-width: 100px;">
+        </div>
+        <div class="group">
+          <label style="color: var(--muted); font-size: 13px;">Мин. качество:</label>
+          <input type="number" id="deals-filter-quality" class="mini" value="0" min="0" max="100" style="max-width: 100px;">
+        </div>
+        <div class="group">
+          <label style="color: var(--muted); font-size: 13px;">Стадия:</label>
+          <select id="deals-filter-stage" style="padding: 12px 14px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.14); background: rgba(0,0,0,0.25); color: var(--text); outline: none;">
+            <option value="">Все</option>
+            <option value="coming_soon">Скоро выйдет</option>
+            <option value="demo">Демо</option>
+            <option value="early_access">Ранний доступ</option>
+            <option value="released">Выпущено</option>
+          </select>
+        </div>
+        <button class="btn primary" onclick="loadDeals()" style="margin-left: auto;">Обновить</button>
+        <button class="btn" onclick="showDiscordImport()" style="margin-left: 8px;">📥 Импорт из Discord</button>
+      </div>
+      
+      <!-- Таблица игр -->
+      <h3 style="margin-top: 24px; font-size: 20px;">Игры с намерением издателя</h3>
+      <div class="status" id="deals-status">Загрузка…</div>
+      <div id="deals-table"></div>
+      
+      <div class="small" style="margin-top: 12px;">
+        API: <code>/api/v1/deals/list</code>, <code>/api/v1/deals/diagnostics</code>
       </div>
     </section>
 
@@ -627,6 +678,8 @@
         loadSystem();
       } else if(tab === "trends") {
         loadTrends();
+      } else if(tab === "deals") {
+        loadDeals();
       } else if(tab === "sources") {
         loadSources();
       } else if(tab === "games") {
@@ -830,6 +883,7 @@
     const statusCards = qs("#system-status-cards");
     const pipelineCards = qs("#trends-pipeline-cards");
     const freshnessEl = qs("#freshness-info");
+    const publicTunnelEl = qs("#public-tunnel-info");
     
     if(!statusCards || !pipelineCards || !freshnessEl) return;
     
@@ -837,12 +891,51 @@
       statusCards.innerHTML = "<div class='status'>Загрузка...</div>";
       pipelineCards.innerHTML = "";
       freshnessEl.textContent = "Загрузка...";
+      if(publicTunnelEl) publicTunnelEl.innerHTML = "Загрузка...";
       
       const summary = await jget(`${API}/admin/system/summary`).catch(() => null);
       
       if(!summary) {
         statusCards.innerHTML = "<div class='status' style='color: rgba(255,107,129,0.85);'>Ошибка загрузки данных</div>";
         return;
+      }
+      
+      // Public Tunnel URL
+      if(publicTunnelEl) {
+        const tunnel = summary.public_tunnel || {};
+        if(tunnel.enabled && tunnel.dashboard_url) {
+          const tokenWarning = !tunnel.has_token_protection ? 
+            '<div style="margin-top: 8px; padding: 8px; background: rgba(255,193,7,0.1); border-radius: 6px; font-size: 12px; color: var(--orange);">⚠️ Public URL без защиты токеном. Установите PUBLIC_DEMO_TOKEN.</div>' : '';
+          
+          publicTunnelEl.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <div style="flex: 1; min-width: 200px;">
+                <div style="font-size: 12px; color: var(--muted); margin-bottom: 4px;">Статус: <span style="color: var(--green);">ON</span></div>
+                <div style="font-size: 12px; color: var(--muted); margin-bottom: 4px;">Provider: <strong>${esc(tunnel.provider || 'unknown')}</strong></div>
+                <div style="margin-top: 8px;">
+                  <a href="${esc(tunnel.dashboard_url)}" target="_blank" style="color: var(--blue); text-decoration: none; font-weight: 600; word-break: break-all;">
+                    ${esc(tunnel.dashboard_url)}
+                  </a>
+                </div>
+              </div>
+              <div>
+                <button onclick="navigator.clipboard.writeText('${esc(tunnel.dashboard_url)}').then(() => { alert('Скопировано!'); })" 
+                        class="btn" style="padding: 8px 16px; font-size: 12px;">
+                  📋 Copy
+                </button>
+              </div>
+            </div>
+            ${tokenWarning}
+          `;
+        } else {
+          const message = tunnel.message || "Public tunnel is disabled. Run: bash scripts/start_tunnel.sh";
+          publicTunnelEl.innerHTML = `
+            <div style="color: var(--muted);">
+              <div style="font-size: 12px; margin-bottom: 4px;">Статус: <span style="color: var(--red);">OFF</span></div>
+              <div style="font-size: 12px; margin-top: 8px;">${esc(message)}</div>
+            </div>
+          `;
+        }
       }
       
       // Статус компонентов
@@ -966,82 +1059,63 @@
         </div>
       `;
       
-      // Top 20 Emerging - используем прямой вызов API для получения полного анализа
+      // Top 20 Emerging - используем новый endpoint v4 Final
       try {
-        const emergingData = await jget(`${API}/trends/games/emerging?limit=20`).catch(err => {
+        const emergingData = await jget(`${API}/trends/emerging?limit=20`).catch(err => {
           console.error("Emerging API error:", err);
-          return { games: [] };
+          return { emerging: [] };
         });
-        const top20 = emergingData.games || [];
+        // Новый формат: {status, emerging, count}
+        const top20 = emergingData.emerging || [];
         
-        // Engine v5: Вычисляем реальное влияние источников на основе компонентов
-        let redditInfluence = 0;
-        let youtubeInfluence = 0;
-        let steamInfluence = 0;
-        let gamesWithReddit = 0;
-        let gamesWithYouTube = 0;
-        let gamesWithSteam = 0;
-        
-        top20.forEach(g => {
-          const components = g.score_components || {};
-          const redditComp = components.reddit_component || 0;
-          const youtubeComp = components.youtube_component || 0;
-          const confirmationComp = components.score_confirmation || 0;
-          
-          if (redditComp > 0) {
-            redditInfluence += redditComp;
-            gamesWithReddit++;
-          } else if (redditComp < 0) {
-            // Anti-hype: отрицательный компонент тоже считается влиянием
-            redditInfluence += Math.abs(redditComp);
-            gamesWithReddit++;
-          }
-          
-          if (youtubeComp > 0) {
-            youtubeInfluence += youtubeComp;
-            gamesWithYouTube++;
-          } else if (youtubeComp < 0) {
-            youtubeInfluence += Math.abs(youtubeComp);
-            gamesWithYouTube++;
-          }
-          
-          if (confirmationComp > 0) {
-            steamInfluence += confirmationComp;
-            gamesWithSteam++;
-          }
-        });
-        
-        const totalInfluence = redditInfluence + youtubeInfluence + steamInfluence;
-        const redditPct = totalInfluence > 0 ? Math.round((redditInfluence / totalInfluence) * 100) : 0;
-        const youtubePct = totalInfluence > 0 ? Math.round((youtubeInfluence / totalInfluence) * 100) : 0;
-        const steamPct = totalInfluence > 0 ? Math.round((steamInfluence / totalInfluence) * 100) : 0;
-        
+        // Engine v4 Final: только Steam Reviews
         // Сохраняем для использования в loadSources
         window.emergingInfluenceData = {
           games_found: top20.length,
-          reddit_pct: redditPct,
-          youtube_pct: youtubePct,
-          steam_pct: steamPct,
-          games_with_reddit: gamesWithReddit,
-          games_with_youtube: gamesWithYouTube,
-          games_with_steam: gamesWithSteam,
-          total_influence: totalInfluence
+          reddit_pct: 0,
+          youtube_pct: 0,
+          steam_pct: 100,
+          games_with_reddit: 0,
+          games_with_youtube: 0,
+          games_with_steam: top20.length,
+          total_influence: top20.length
         };
         
+        // Получаем diagnostics для объяснения, если emerging = 0
+        let diagnostics = null;
+        if (top20.length === 0) {
+          try {
+            diagnostics = await jget(`${API}/trends/emerging/diagnostics`).catch(() => null);
+          } catch (e) {
+            console.warn("Failed to load diagnostics:", e);
+          }
+        }
+        
         if(top20.length === 0) {
+          const diagText = diagnostics ? `
+            <p style="margin-top: 12px;">Диагностика:</p>
+            <ul style="text-align: left; display: inline-block; margin-top: 8px; font-size: 13px;">
+              <li>Всего seed-игр: ${diagnostics.total_seed_apps || 0}</li>
+              <li>Прошли Growth фильтр: ${diagnostics.passed_growth || 0}</li>
+              <li>Прошли Quality фильтр: ${diagnostics.passed_quality || 0}</li>
+              <li>Отфильтрованы как Evergreen: ${diagnostics.filtered_evergreen || 0}</li>
+              <li>Ниже порога score: ${diagnostics.below_score_threshold || 0}</li>
+            </ul>
+            <p style="margin-top: 12px; font-size: 12px; color: var(--muted);">
+              Emerging Engine v4 Final использует только Steam Reviews.<br>
+              Формула: log1p(recent_reviews_30d) × positive_ratio
+            </p>
+          ` : '';
+          
           emergingStatus.innerHTML = `
             <div style="padding: 40px; text-align: center; color: var(--muted);">
               <h3 style="color: var(--orange); margin-bottom: 8px;">Нет Emerging Games</h3>
-              <p>Возможные причины:</p>
-              <ul style="text-align: left; display: inline-block; margin-top: 12px;">
-                <li>Отсутствуют числовые сигналы: ${diag.seeds_missing_numeric_signals || 0} игр</li>
-                <li>Отфильтрованы как evergreen giants: ${diag.filtered_evergreen_giants || 0} игр</li>
-              </ul>
+              ${diagText}
             </div>
           `;
           emergingTable.innerHTML = "";
         } else {
-          emergingStatus.textContent = `Найдено ${top20.length} игр`;
+          emergingStatus.textContent = `Найдено ${top20.length} emerging игр (Engine v4 Final)`;
           
           // Показываем фильтры
           const filtersEl = qs("#trends-filters");
@@ -1053,211 +1127,65 @@
                 <tr>
                   <th>Ранг</th>
                   <th>Игра</th>
-                  <th>Вердикт</th>
-                  <th>Балл</th>
-                  <th>Уверенность</th>
-                  <th>Стадия</th>
-                  <th>Жизненный цикл</th>
-                  <th>Тип роста</th>
-                  <th>Источники</th>
-                  <th>Ссылки</th>
-                  <th>Отзывы</th>
-                  <th>Δ 7 дней</th>
-                  <th>Почему сейчас</th>
+                  <th>Reviews (30d)</th>
+                  <th>Positive %</th>
+                  <th>Score</th>
+                  <th>Verdict</th>
                 </tr>
               </thead>
               <tbody>
                 ${top20.map((g, idx) => {
-                  // Перевод Verdict
-                  const verdictRaw = g.verdict || '';
-                  let verdict = verdictRaw;
+                  // Новый формат v4: app_id, name, recent_reviews_30d, positive_ratio, emerging_score, verdict
+                  const appId = g.app_id || g.steam_app_id;
+                  const gameName = g.name || `App #${appId}`;
+                  const steamUrl = g.steam_url || `https://store.steampowered.com/app/${appId}/`;
+                  const recentReviews = g.recent_reviews_30d || 0;
+                  const positiveRatio = (g.positive_ratio || 0) * 100;
+                  const score = g.emerging_score || 0;
+                  const verdict = g.verdict || "Неизвестно";
+                  
+                  // Цвет для verdict
                   let verdictColor = 'var(--muted)';
-                  
-                  if (verdictRaw.includes('Strong') || verdictRaw.includes('organic')) {
-                    verdict = 'Сильный сигнал';
+                  if (verdict.includes('Устойчивый рост') || verdict.includes('emerging')) {
                     verdictColor = 'var(--green)';
-                  } else if (verdictRaw.includes('Hype') || verdictRaw.includes('spike')) {
-                    verdict = 'Хайп-всплеск';
-                    verdictColor = 'var(--orange)';
-                  } else if (verdictRaw.includes('Weak') || verdictRaw.includes('Limited')) {
-                    verdict = 'Слабый сигнал';
-                    verdictColor = 'var(--muted)';
-                  } else if (verdictRaw.includes('Early')) {
-                    verdict = 'Ранний сигнал';
-                    verdictColor = 'var(--orange)';
-                  } else if (verdictRaw.includes('Moderate') || verdictRaw.includes('Promising')) {
-                    verdict = 'Умеренный рост';
+                  } else if (verdict.includes('Ранний рост') || verdict.includes('наблюдения')) {
                     verdictColor = 'var(--blue)';
-                  } else if (verdictRaw) {
-                    verdict = verdictRaw; // Оставляем как есть если не распознали
-                  } else {
-                    verdict = 'Нет данных';
+                  } else if (verdict.includes('слабая динамика')) {
+                    verdictColor = 'var(--orange)';
+                  } else if (verdict.includes('Недостаточно') || verdict.includes('низкое качество')) {
+                    verdictColor = 'var(--red)';
                   }
                   
-                  // Формируем название и ссылку (используем game_name из API)
-                  const steamUrl = g.steam_url || `https://store.steampowered.com/app/${g.steam_app_id}/`;
-                  let displayName = (g.game_name || g.name);
-                  const isUnknown = !displayName || !displayName.trim() || displayName.includes('Unknown') || displayName.includes('App #');
-                  
-                  if (isUnknown) {
-                    displayName = `Unknown Game (#${g.steam_app_id})`;
-                  }
-                  
-                  // Brain v3 fields
-                  const confidenceScore = g.confidence_score || 0;
-                  const confidenceLevelRaw = g.confidence_level || 'LOW';
-                  
-                  // Перевод Confidence (используем уже переведённое значение из API)
-                  let confidenceLevel = confidenceLevelRaw; // API уже возвращает на русском
-                  let confidenceColor = 'var(--muted)';
-                  if (confidenceLevelRaw === 'Высокая' || confidenceLevelRaw === 'HIGH') {
-                    confidenceColor = 'var(--green)';
-                  } else if (confidenceLevelRaw === 'Средняя' || confidenceLevelRaw === 'MEDIUM') {
-                    confidenceColor = 'var(--orange)';
-                  }
-                  
-                  // Stage (используем уже переведённое значение из API)
-                  const stage = g.stage || 'Шум';
-                  let stageColor = 'var(--muted)';
-                  if (stage.includes('Прорыв')) {
-                    stageColor = 'var(--green)';
-                  } else if (stage.includes('Подтверждение')) {
-                    stageColor = 'var(--blue)';
-                  } else if (stage.includes('Ранний')) {
-                    stageColor = 'var(--orange)';
-                  }
-                  
-                  // Lifecycle Intelligence v5
-                  const lifecycleStage = g.lifecycle_stage || 'Зрелость';
-                  let lifecycleColor = 'var(--muted)';
-                  let lifecycleIcon = '';
-                  if (lifecycleStage.includes('Прорыв')) {
-                    lifecycleColor = 'var(--green)';
-                  } else if (lifecycleStage.includes('Рост')) {
-                    lifecycleColor = 'var(--blue)';
-                  } else if (lifecycleStage.includes('Кандидат на перезапуск')) {
-                    lifecycleColor = 'var(--orange)';
-                    lifecycleIcon = '🔁 ';
-                  } else if (lifecycleStage.includes('Спад')) {
-                    lifecycleColor = 'var(--red)';
-                  }
-                  
-                  // Anti-Hype Layer v5: Тип роста
-                  const growthType = g.growth_type || 'Органический';
-                  let growthTypeColor = 'var(--green)';
-                  let growthTypeTooltip = 'Рост подтверждён несколькими источниками';
-                  if (growthType.includes('Хайп')) {
-                    growthTypeColor = 'var(--orange)';
-                    growthTypeTooltip = 'Риск хайпа: рост только в социальных сетях без подтверждения Steam';
-                  } else if (growthType.includes('Новостной')) {
-                    growthTypeColor = 'var(--blue)';
-                    growthTypeTooltip = 'Рост на новостях: обновления в Steam';
-                  } else if (growthType.includes('Платформенный')) {
-                    growthTypeColor = 'var(--muted)';
-                    growthTypeTooltip = 'Рост только в Steam, без внешних сигналов';
-                  } else if (growthType.includes('Смешанный')) {
-                    growthTypeColor = 'var(--green)';
-                    growthTypeTooltip = 'Множественные источники согласованы';
-                  }
-                  
-                  // WHY NOW v2
-                  const whyNowV2 = g.why_now_v2 || null;
-                  const whyNow = g.why_now || 'Недостаточно данных для анализа';
-                  const signalsUsed = g.signals_used || [];
-                  
-                  // Final rank score (v5: confidence как фактор)
-                  const finalRankScore = g.final_rank_score || g.emerging_score || 0;
-                  
-                  // Signals badges
-                  const signalsBadges = signalsUsed.map(s => {
-                    if (s === 'steam_reviews') return '<span style="background: rgba(110,168,255,0.2); padding: 2px 6px; border-radius: 3px; font-size: 10px;">Steam</span>';
-                    if (s === 'reddit') return '<span style="background: rgba(255,184,107,0.2); padding: 2px 6px; border-radius: 3px; font-size: 10px;">Reddit</span>';
-                    if (s === 'youtube') return '<span style="background: rgba(255,107,129,0.2); padding: 2px 6px; border-radius: 3px; font-size: 10px;">YouTube</span>';
-                    if (s === 'steam_news') return '<span style="background: rgba(110,255,184,0.2); padding: 2px 6px; border-radius: 3px; font-size: 10px;">News</span>';
-                    return '';
-                  }).join(' ');
-                  
-                  // Engine v4: Evidence links
-                  const evidence = g.evidence || [];
-                  const evidenceLinks = evidence.slice(0, 3).map(ev => {
-                    const sourceIcon = ev.source === 'steam_news' ? '📰' : 
-                                     ev.source === 'reddit' ? '💬' : 
-                                     ev.source === 'youtube' ? '🎥' : '🔗';
-                    const title = ev.title || 'Без названия';
-                    const url = ev.url || '#';
-                    return `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="${esc(title)}" style="text-decoration: none; margin: 0 2px; font-size: 14px;">${sourceIcon}</a>`;
-                  }).join('');
-                  
-                  const evidenceTooltip = evidence.length > 0 ? 
-                    evidence.map(ev => `${ev.source}: ${ev.title || 'Без названия'}`).join('\\n') : 
-                    'Нет ссылок';
-                  
-                  // WHY NOW v2: кнопка с раскрывающимся блоком
-                  const whyNowV2Id = `why-now-${g.steam_app_id}-${idx}`;
-                  let whyNowButton = '';
-                  let whyNowContent = '';
-                  
-                  if (whyNowV2 && whyNowV2.основной_триггер) {
-                    whyNowButton = `<button onclick="toggleWhyNow('${whyNowV2Id}')" style="background: rgba(110,168,255,0.2); border: 1px solid rgba(110,168,255,0.3); color: var(--blue); padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; white-space: nowrap;">Почему сейчас?</button>`;
-                    whyNowContent = `
-                      <div id="${whyNowV2Id}" style="display: none; position: fixed; background: var(--panel); border: 1px solid var(--stroke); border-radius: 8px; padding: 12px; z-index: 10000; max-width: 400px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); margin-top: 4px;">
-                        <div style="font-weight: 600; margin-bottom: 8px; color: var(--blue);">${esc(whyNowV2.основной_триггер || '')}</div>
-                        ${whyNowV2.дополнительные_факторы && whyNowV2.дополнительные_факторы.length > 0 ? `
-                          <div style="margin-top: 8px; font-size: 12px;">
-                            <div style="color: var(--muted); margin-bottom: 4px;">Дополнительные факторы:</div>
-                            ${whyNowV2.дополнительные_факторы.map(f => `<div style="margin-left: 8px; margin-top: 2px;">• ${esc(f)}</div>`).join('')}
-                          </div>
-                        ` : ''}
-                        ${whyNowV2.аномалия ? `<div style="margin-top: 8px; font-size: 12px; color: var(--orange);">⚠️ ${esc(whyNowV2.аномалия)}</div>` : ''}
-                        ${whyNowV2.риски ? `<div style="margin-top: 8px; font-size: 12px; color: var(--red);">⚠️ Риски: ${esc(whyNowV2.риски)}</div>` : ''}
-                        ${whyNowV2.инвестиционное_окно_дней > 0 ? `<div style="margin-top: 8px; font-size: 11px; color: var(--muted);">⏱ Окно возможностей: ${whyNowV2.инвестиционное_окно_дней} дней</div>` : ''}
-                      </div>
-                    `;
-                  } else {
-                    whyNowButton = `<span style="font-size: 11px; color: var(--muted);" title="${esc(whyNow)}">${esc(whyNow.length > 50 ? whyNow.substring(0, 50) + '...' : whyNow)}</span>`;
-                  }
-                  
-                  // Цвет карточки по confidence (v5)
-                  let rowBgColor = '';
-                  if (confidenceScore >= 70) {
-                    rowBgColor = 'rgba(121,226,155,0.05)'; // Зелёный для высокого confidence
-                  } else if (confidenceScore >= 40) {
-                    rowBgColor = 'rgba(255,184,107,0.05)'; // Оранжевый для среднего
-                  } else {
-                    rowBgColor = 'rgba(255,107,129,0.05)'; // Красный для низкого
-                  }
+                  // Цвет для score
+                  let scoreColor = 'var(--muted)';
+                  if (score >= 4.0) scoreColor = 'var(--green)';
+                  else if (score >= 2.0) scoreColor = 'var(--orange)';
+                  else if (score > 0) scoreColor = 'var(--red)';
                   
                   return `
-                    <tr style="background: ${rowBgColor};" data-lifecycle-stage="${g.lifecycle_stage_raw || ''}" data-confidence-level="${g.confidence_level_raw || ''}">
-                      <td>${idx + 1}</td>
-                      <td>
-                        ${isUnknown ? '<span style="color: var(--orange);">⚠️</span> ' : ''}
-                        <a href="${esc(steamUrl)}" target="_blank" rel="noopener noreferrer" style="color: var(--blue); text-decoration: underline; text-decoration-color: rgba(110,168,255,0.5); transition: text-decoration-color 0.2s;" onmouseover="this.style.textDecorationColor='var(--blue)'" onmouseout="this.style.textDecorationColor='rgba(110,168,255,0.5)'">${esc(displayName.replace(/\(#\d+\)/g, '').trim())}</a>
-                        <span style="color: var(--muted); font-size: 11px; margin-left: 6px;">(#${g.steam_app_id || ''})</span>
+                    <tr style="border-bottom: 1px solid var(--stroke); ${idx % 2 === 0 ? 'background: rgba(255,255,255,0.02);' : ''}">
+                      <td style="padding: 12px; font-weight: 600;">${idx + 1}</td>
+                      <td style="padding: 12px;">
+                        <a href="${esc(steamUrl)}" target="_blank" style="color: var(--blue); text-decoration: none; font-weight: 600;">
+                          ${esc(gameName)}
+                        </a>
+                        <div style="font-size: 11px; color: var(--muted); margin-top: 2px;">
+                          App ID: ${appId}
+                        </div>
                       </td>
-                      <td style="color: ${verdictColor}; font-weight: 600; font-size: 12px;">${esc(verdict)}</td>
-                      <td>
-                        <strong>${finalRankScore.toFixed(1)}</strong>
-                        ${finalRankScore !== (g.emerging_score || 0) ? `<div style="font-size: 9px; color: var(--muted);">(${(g.emerging_score || 0).toFixed(1)})</div>` : ''}
+                      <td style="text-align: right; padding: 12px;">
+                        <div style="font-weight: 600; color: var(--text);">${recentReviews}</div>
                       </td>
-                      <td style="color: ${confidenceColor}; font-size: 12px;">
-                        <div>${esc(confidenceLevel)}</div>
-                        <div style="font-size: 10px; color: var(--muted);">${confidenceScore.toFixed(0)}</div>
+                      <td style="text-align: right; padding: 12px;">
+                        <div style="font-weight: 600; color: ${positiveRatio >= 80 ? 'var(--green)' : positiveRatio >= 70 ? 'var(--orange)' : 'var(--red)'};">
+                          ${positiveRatio.toFixed(1)}%
+                        </div>
                       </td>
-                      <td style="color: ${stageColor}; font-size: 12px; font-weight: 600;">${esc(stage)}</td>
-                      <td style="color: ${lifecycleColor}; font-size: 11px; font-weight: 600;">
-                        ${lifecycleIcon}${esc(lifecycleStage)}
+                      <td style="text-align: right; padding: 12px;">
+                        <div style="font-weight: 600; color: ${scoreColor};">${score.toFixed(2)}</div>
                       </td>
-                      <td title="${esc(growthTypeTooltip)}" style="font-size: 11px;">
-                        <span style="background: ${growthTypeColor}20; color: ${growthTypeColor}; padding: 2px 6px; border-radius: 3px; border: 1px solid ${growthTypeColor}40;">${esc(growthType)}</span>
-                      </td>
-                      <td style="font-size: 11px;">${signalsBadges || '<span style="color: var(--muted);">—</span>'}</td>
-                      <td title="${esc(evidenceTooltip)}" style="font-size: 14px; text-align: center;">${evidenceLinks || '<span style="color: var(--muted);">—</span>'}</td>
-                      <td>${g.reviews_total || '—'}</td>
-                      <td>${g.reviews_delta_7d || '—'}</td>
-                      <td style="font-size: 11px; position: relative;">
-                        ${whyNowButton}
-                        ${whyNowContent}
+                      <td style="text-align: center; padding: 12px;">
+                        <div style="font-size: 12px; color: ${verdictColor}; font-weight: 600;">${esc(verdict)}</div>
                       </td>
                     </tr>
                   `;
@@ -1274,6 +1202,609 @@
     }catch(e){
       emergingStatus.textContent = `Ошибка: ${esc(e.message)}`;
       emergingStatus.style.color = "rgba(255,107,129,0.85)";
+    }
+  }
+
+  // ==========================================
+  // Deals / Publisher Intent
+  // ==========================================
+  async function loadDeals(){
+    const statsCards = qs("#deals-stats-cards");
+    const dealsStatus = qs("#deals-status");
+    const dealsTable = qs("#deals-table");
+    
+    if(!statsCards || !dealsStatus || !dealsTable) return;
+    
+    try{
+      dealsStatus.textContent = "Загрузка...";
+      dealsTable.innerHTML = "";
+      
+      // Получаем diagnostics
+      const diagnostics = await jget(`${API}/deals/diagnostics`).catch(() => null);
+      
+      // Статистика
+      if(diagnostics) {
+        statsCards.innerHTML = `
+          <div class="kpi">
+            <div class="label">Снимков игр</div>
+            <div class="val">${diagnostics.snapshot_rows || 0}</div>
+          </div>
+          <div class="kpi">
+            <div class="label">С намерением</div>
+            <div class="val orange">${diagnostics.intent_gt_0 || 0}</div>
+          </div>
+          <div class="kpi">
+            <div class="label">С качеством</div>
+            <div class="val green">${diagnostics.quality_gt_0 || 0}</div>
+          </div>
+          <div class="kpi">
+            <div class="label">Самоиздание</div>
+            <div class="val">${diagnostics.self_published || 0}</div>
+          </div>
+        `;
+      }
+      
+      // Получаем фильтры
+      const minIntent = parseInt(qs("#deals-filter-intent")?.value || "0");
+      const minQuality = parseInt(qs("#deals-filter-quality")?.value || "0");
+      const stage = qs("#deals-filter-stage")?.value || "";
+      
+      // Загружаем список игр
+      let url = `${API}/deals/list?limit=50&min_intent_score=${minIntent}&min_quality_score=${minQuality}`;
+      if(stage) url += `&stage=${stage}`;
+      
+      const dealsData = await jget(url).catch(err => {
+        console.error("Deals API error:", err);
+        return { games: [] };
+      });
+      
+      const games = dealsData.games || [];
+      
+      if(games.length === 0) {
+        // Показываем причины пустоты из diagnostics
+        const diagText = diagnostics ? `
+          <div style="margin-top: 16px; padding: 16px; background: rgba(0,0,0,0.2); border-radius: 12px; text-align: left;">
+            <h4 style="color: var(--orange); margin-bottom: 12px; font-size: 14px;">Причины отсутствия игр:</h4>
+            <ul style="font-size: 12px; color: var(--muted); line-height: 1.8; margin: 0; padding-left: 20px;">
+              ${diagnostics.snapshot_rows === 0 ? '<li style="color: var(--red);">❌ Snapshot не запущен — таблица deal_intent_game пустая</li>' : ''}
+              ${diagnostics.top_zero_reasons ? `
+                ${diagnostics.top_zero_reasons.has_publisher > 0 ? `<li>${Math.round(diagnostics.top_zero_reasons.has_publisher / diagnostics.snapshot_rows * 100)}% игр имеют издателя</li>` : ''}
+                ${diagnostics.top_zero_reasons.no_external_signals > 0 ? `<li>${Math.round(diagnostics.top_zero_reasons.no_external_signals / diagnostics.snapshot_rows * 100)}% игр не имеют внешних сигналов</li>` : ''}
+                ${diagnostics.top_zero_reasons.old_releases > 0 ? `<li>${Math.round(diagnostics.top_zero_reasons.old_releases / diagnostics.snapshot_rows * 100)}% — старые релизы (>3 лет)</li>` : ''}
+              ` : ''}
+              ${diagnostics.intent_gt_0 === 0 && diagnostics.snapshot_rows > 0 ? '<li style="color: var(--orange);">⚠️ Все игры имеют intent_score = 0</li>' : ''}
+            </ul>
+            ${diagnostics.snapshot_rows === 0 ? `
+              <div style="margin-top: 16px; padding: 12px; background: rgba(110,168,255,0.1); border-radius: 8px;">
+                <p style="font-size: 12px; color: var(--blue); margin: 0 0 8px 0;">
+                  <strong>Решение:</strong> Запустите bootstrap для заполнения данных:
+                </p>
+                <code style="font-size: 11px; color: var(--muted); display: block; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 6px;">
+                  POST /api/v1/deals/bootstrap?limit=50
+                </code>
+              </div>
+            ` : ''}
+          </div>
+        ` : '';
+        
+        dealsStatus.innerHTML = `
+          <div style="padding: 40px; text-align: center; color: var(--muted);">
+            <h3 style="color: var(--orange); margin-bottom: 8px;">Нет игр с намерением издателя</h3>
+            <p style="margin-top: 12px; font-size: 13px;">
+              Попробуйте снизить фильтры или запустите snapshot job для обновления данных.
+            </p>
+            ${diagText}
+          </div>
+        `;
+        dealsTable.innerHTML = "";
+      } else {
+        dealsStatus.textContent = `Найдено ${games.length} игр`;
+        
+        dealsTable.innerHTML = `
+          <table class="table" style="margin-top: 12px;">
+            <thead>
+              <tr>
+                <th>Игра</th>
+                <th>Стадия</th>
+                <th>Издатель</th>
+                <th>Вердикт</th>
+                <th>Намерение</th>
+                <th>Качество</th>
+                <th>Отзывы (30д)</th>
+                <th>Демо</th>
+                <th>Действия</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${games.map((g, idx) => {
+                const intentColor = g.intent_score >= 50 ? 'var(--green)' : g.intent_score >= 20 ? 'var(--orange)' : 'var(--muted)';
+                const qualityColor = g.quality_score >= 50 ? 'var(--green)' : g.quality_score >= 20 ? 'var(--orange)' : 'var(--muted)';
+                
+                // Вердикт с цветом
+                const verdict = g.verdict_label_ru || g.verdict || 'Неизвестно';
+                let verdictColor = 'var(--muted)';
+                let verdictBadge = '';
+                if (verdict.includes('🟢') || verdict.includes('Активно ищет')) {
+                  verdictColor = 'var(--green)';
+                  verdictBadge = '🟢';
+                } else if (verdict.includes('🟡') || verdict.includes('Ранний запрос')) {
+                  verdictColor = 'var(--orange)';
+                  verdictBadge = '🟡';
+                } else if (verdict.includes('🟠') || verdict.includes('Возможная сделка')) {
+                  verdictColor = 'var(--orange)';
+                  verdictBadge = '🟠';
+                } else if (verdict.includes('⚪') || verdict.includes('Успешный проект')) {
+                  verdictColor = 'var(--muted)';
+                  verdictBadge = '⚪';
+                } else if (verdict.includes('🔴') || verdict.includes('Нет признаков')) {
+                  verdictColor = 'var(--red)';
+                  verdictBadge = '🔴';
+                }
+                
+                // Человеческие объяснения для Intent и Quality
+                const intentExplanation = (g.intent_reasons_ru && g.intent_reasons_ru.length > 0) 
+                  ? g.intent_reasons_ru[0].replace(/[a-z_]+/g, '').trim() || g.intent_reasons_ru[0]
+                  : 'Нет данных';
+                const qualityExplanation = (g.quality_reasons_ru && g.quality_reasons_ru.length > 0)
+                  ? g.quality_reasons_ru[0].replace(/[a-z_]+/g, '').trim() || g.quality_reasons_ru[0]
+                  : 'Нет данных';
+                
+                return `
+                  <tr style="border-bottom: 1px solid var(--stroke); ${idx % 2 === 0 ? 'background: rgba(255,255,255,0.02);' : ''}">
+                    <td style="padding: 12px;">
+                      <a href="${esc(g.steam_url || `https://store.steampowered.com/app/${g.app_id}/`)}" target="_blank" style="color: var(--blue); text-decoration: none; font-weight: 600;">
+                        ${esc(g.title || g.name || `App ${g.app_id}`)}
+                      </a>
+                      <div style="font-size: 11px; color: var(--muted); margin-top: 2px;">
+                        ${g.developer || 'Неизвестно'} • ID: ${g.app_id}
+                      </div>
+                    </td>
+                    <td style="padding: 12px;">
+                      <span style="font-size: 12px; color: var(--muted);">${esc(g.stage === 'coming_soon' ? 'Скоро выйдет' : g.stage === 'demo' ? 'Демо' : g.stage === 'early_access' ? 'Ранний доступ' : g.stage === 'released' ? 'Выпущено' : 'неизвестно')}</span>
+                    </td>
+                    <td style="padding: 12px;">
+                      <span style="font-size: 12px; color: var(--muted);">${esc(g.publisher || 'Самоиздание')}</span>
+                    </td>
+                    <td style="padding: 12px;">
+                      <span style="font-size: 12px; color: ${verdictColor}; font-weight: 600;">${verdictBadge} ${esc(verdict.replace(/[🟢🟡🟠⚪🔴]/g, '').trim())}</span>
+                    </td>
+                    <td style="padding: 12px; text-align: center;">
+                      <div style="font-weight: 600; color: ${intentColor}; cursor: pointer;" 
+                           title="${esc((g.intent_reasons_ru || []).join('; ') || 'Нет причин')}"
+                           onclick="showDealDetail(${g.app_id})">${g.intent_score || 0}</div>
+                      <div style="font-size: 10px; color: var(--muted); margin-top: 2px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" 
+                           title="${esc(intentExplanation)}">${esc(intentExplanation)}</div>
+                    </td>
+                    <td style="padding: 12px; text-align: center;">
+                      <div style="font-weight: 600; color: ${qualityColor}; cursor: pointer;" 
+                           title="${esc((g.quality_reasons_ru || []).join('; ') || 'Нет причин')}"
+                           onclick="showDealDetail(${g.app_id})">${g.quality_score || 0}</div>
+                      <div style="font-size: 10px; color: var(--muted); margin-top: 2px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" 
+                           title="${esc(qualityExplanation)}">${esc(qualityExplanation)}</div>
+                    </td>
+                    <td style="padding: 12px; text-align: center;">
+                      <div style="font-weight: 600;">${g.recent_reviews_30d || 0}</div>
+                    </td>
+                    <td style="padding: 12px; text-align: center;">
+                      ${g.has_demo ? '✅' : '—'}
+                    </td>
+                    <td style="padding: 12px;">
+                      <button onclick="showDealDetail(${g.app_id})" class="btn" style="padding: 6px 12px; font-size: 12px;">Действия</button>
+                    </td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+        `;
+      }
+      
+    } catch(e) {
+      dealsStatus.textContent = `Ошибка загрузки: ${esc(e.message)}`;
+      dealsStatus.style.color = "rgba(255,107,129,0.85)";
+      console.error("loadDeals error:", e);
+    }
+  }
+  
+  let currentDealDetail = null;
+  
+  async function showDealDetail(appId) {
+    const modal = qs("#deal-detail-modal");
+    if (!modal) {
+      console.error("Modal #deal-detail-modal not found");
+      return;
+    }
+    
+    modal.style.display = "flex";
+    
+    // Показываем загрузку
+    const content = qs("#deal-detail-content");
+    if (content) {
+      content.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--muted);">Загрузка...</div>';
+    }
+    
+    try {
+      const detail = await jget(`${API}/deals/${appId}/detail`);
+      currentDealDetail = detail;
+      
+      if (content) {
+        const stageNames = {
+          'coming_soon': 'Скоро выйдет',
+          'demo': 'Демо',
+          'early_access': 'Ранний доступ',
+          'released': 'Выпущено'
+        };
+        
+        content.innerHTML = `
+          <div style="max-height: 80vh; overflow-y: auto;">
+            <!-- Вкладки v3.1 -->
+            <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--stroke); margin-bottom: 20px; padding-bottom: 12px; flex-wrap: wrap;">
+              <button class="deal-tab-btn active" data-tab="summary" onclick="switchDealTab('summary')">Сводка</button>
+              <button class="deal-tab-btn" data-tab="behavioral" onclick="switchDealTab('behavioral')">Почему ищут издателя</button>
+              <button class="deal-tab-btn" data-tab="freshness" onclick="switchDealTab('freshness')">Почему сейчас</button>
+              <button class="deal-tab-btn" data-tab="risks" onclick="switchDealTab('risks')">Риски</button>
+              <button class="deal-tab-btn" data-tab="sources" onclick="switchDealTab('sources')">Источники и ссылки</button>
+              <button class="deal-tab-btn" data-tab="playbooks" onclick="switchDealTab('playbooks')">Плейбуки</button>
+            </div>
+            
+            <!-- Сводка v3.1 -->
+            <div id="deal-tab-summary" class="deal-tab-content">
+              <h2 style="margin-bottom: 16px; font-size: 24px;">${esc(detail.title || `App ${appId}`)}</h2>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;">
+                <div>
+                  <div style="font-size: 12px; color: var(--muted); margin-bottom: 4px;">Стадия</div>
+                  <div style="font-weight: 600;">${esc(detail.stage || 'неизвестно')}</div>
+                </div>
+                <div>
+                  <div style="font-size: 12px; color: var(--muted); margin-bottom: 4px;">Статус издателя</div>
+                  <div style="font-weight: 600;">${esc(detail.publisher_status || 'Неизвестно')}</div>
+                </div>
+                <div>
+                  <div style="font-size: 12px; color: var(--muted); margin-bottom: 4px;">Дата релиза</div>
+                  <div style="font-weight: 600;">${detail.release_date ? esc(detail.release_date.split('T')[0]) : 'не указана'}</div>
+                </div>
+                <div>
+                  <div style="font-size: 12px; color: var(--muted); margin-bottom: 4px;">Возраст</div>
+                  <div style="font-weight: 600;">${detail.age_days !== null && detail.age_days !== undefined ? `${Math.floor(detail.age_days / 30)} месяцев` : 'неизвестно'}</div>
+                </div>
+              </div>
+              
+              <div style="padding: 16px; background: rgba(0,0,0,0.2); border-radius: 12px; border-left: 3px solid var(--blue); margin-bottom: 24px;">
+                <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">Вердикт</div>
+                <div style="font-weight: 600; font-size: 18px;">${esc(detail.verdict || 'Неизвестно')}</div>
+              </div>
+              
+              <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 24px;">
+                <div style="padding: 20px; background: rgba(0,0,0,0.3); border-radius: 12px; text-align: center;">
+                  <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">Intent Score (raw)</div>
+                  <div style="font-size: 32px; font-weight: 700; color: ${detail.intent_score_raw >= 50 ? 'var(--green)' : detail.intent_score_raw >= 20 ? 'var(--orange)' : 'var(--muted)'};">${detail.intent_score_raw || 0}</div>
+                </div>
+                <div style="padding: 20px; background: rgba(0,0,0,0.3); border-radius: 12px; text-align: center;">
+                  <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">Intent Score (final)</div>
+                  <div style="font-size: 32px; font-weight: 700; color: ${detail.intent_score_final >= 50 ? 'var(--green)' : detail.intent_score_final >= 20 ? 'var(--orange)' : 'var(--muted)'};">${detail.intent_score_final || 0}</div>
+                </div>
+                <div style="padding: 20px; background: rgba(0,0,0,0.3); border-radius: 12px; text-align: center;">
+                  <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">Quality Score</div>
+                  <div style="font-size: 32px; font-weight: 700; color: ${detail.quality_score >= 50 ? 'var(--green)' : detail.quality_score >= 20 ? 'var(--orange)' : 'var(--muted)'};">${detail.quality_score || 0}</div>
+                </div>
+              </div>
+              
+              ${detail.gates ? `
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;">
+                <div style="padding: 16px; background: ${detail.gates.freshness_gate_passed ? 'rgba(121,226,155,0.1)' : 'rgba(255,107,129,0.1)'}; border-radius: 12px; border-left: 3px solid ${detail.gates.freshness_gate_passed ? 'var(--green)' : 'var(--red)'};">
+                  <div style="font-size: 12px; color: var(--muted); margin-bottom: 4px;">Freshness Gate</div>
+                  <div style="font-weight: 600; color: ${detail.gates.freshness_gate_passed ? 'var(--green)' : 'var(--red)'};">${detail.gates.freshness_gate_passed ? '✅ Пройден' : '❌ Не пройден'}</div>
+                  <div style="font-size: 11px; color: var(--muted); margin-top: 4px;">${esc(detail.gates.freshness_gate_reason_ru || '')}</div>
+                </div>
+                <div style="padding: 16px; background: ${detail.gates.success_penalty_applied ? 'rgba(255,184,107,0.1)' : 'rgba(121,226,155,0.1)'}; border-radius: 12px; border-left: 3px solid ${detail.gates.success_penalty_applied ? 'var(--orange)' : 'var(--green)'};">
+                  <div style="font-size: 12px; color: var(--muted); margin-bottom: 4px;">Success Penalty</div>
+                  <div style="font-weight: 600; color: ${detail.gates.success_penalty_applied ? 'var(--orange)' : 'var(--green)'};">${detail.gates.success_penalty_applied ? `⚠️ Применён (×${detail.gates.success_penalty_multiplier})` : '✅ Не применён'}</div>
+                  <div style="font-size: 11px; color: var(--muted); margin-top: 4px;">${esc(detail.gates.success_penalty_reason_ru || '')}</div>
+                </div>
+              </div>
+              ` : ''}
+            </div>
+            
+            <!-- Почему ищут издателя (Behavioral Intent) -->
+            <div id="deal-tab-behavioral" class="deal-tab-content" style="display: none;">
+              <h3 style="margin-bottom: 16px;">Behavioral Intent — активные сигналы намерения</h3>
+              ${(detail.behavioral_signals && detail.behavioral_signals.length > 0) ? `
+                <div style="margin-bottom: 20px;">
+                  ${detail.behavioral_signals.map(signal => `
+                    <div style="padding: 16px; background: rgba(0,0,0,0.2); border-radius: 12px; margin-bottom: 12px; border-left: 3px solid var(--blue);">
+                      <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+                        <div>
+                          <div style="font-weight: 600; color: var(--blue);">${esc(signal.source || 'unknown')}</div>
+                          <div style="font-size: 11px; color: var(--muted); margin-top: 2px;">${signal.ts ? esc(signal.ts.split('T')[0]) : 'дата неизвестна'}</div>
+                        </div>
+                        ${signal.url ? `<a href="${esc(signal.url)}" target="_blank" style="color: var(--blue); text-decoration: none;">🔗</a>` : ''}
+                      </div>
+                      <div style="font-size: 13px; color: var(--text); margin-bottom: 8px; line-height: 1.5;">${esc(signal.text || '')}</div>
+                      ${signal.matched_keywords && signal.matched_keywords.length > 0 ? `
+                        <div style="font-size: 11px; color: var(--muted);">
+                          Найдены ключевые слова: ${signal.matched_keywords.map(k => `<span style="background: rgba(110,168,255,0.2); padding: 2px 6px; border-radius: 4px; margin-right: 4px;">${esc(k)}</span>`).join('')}
+                        </div>
+                      ` : ''}
+                    </div>
+                  `).join('')}
+                </div>
+              ` : '<div style="padding: 20px; text-align: center; color: var(--muted);">Нет behavioral signals</div>'}
+              
+              <h4 style="margin-top: 24px; margin-bottom: 12px;">3-слойный breakdown Intent Score</h4>
+              <table class="table" style="margin-top: 12px;">
+                <thead>
+                  <tr>
+                    <th>Фактор</th>
+                    <th>Баллы</th>
+                    <th>Источник</th>
+                    <th>Доказательство</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${(detail.intent_breakdown || []).map(item => `
+                    <tr>
+                      <td>${esc(item.label_ru || '—')}</td>
+                      <td style="color: ${item.points > 0 ? 'var(--green)' : item.points < 0 ? 'var(--red)' : 'var(--muted)'};">${item.points > 0 ? '+' : ''}${item.points || 0}</td>
+                      <td style="font-size: 11px; color: var(--muted);">${esc(item.source || '—')}</td>
+                      <td style="font-size: 11px; color: var(--muted); max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${esc(item.evidence || '—')}</td>
+                    </tr>
+                  `).join('')}
+                  ${(detail.intent_breakdown || []).length === 0 ? '<tr><td colspan="4" style="text-align: center; color: var(--muted); padding: 20px;">Нет данных</td></tr>' : ''}
+                </tbody>
+              </table>
+            </div>
+            
+            <!-- Почему сейчас (Freshness) -->
+            <div id="deal-tab-freshness" class="deal-tab-content" style="display: none;">
+              <h3 style="margin-bottom: 16px;">Freshness Gate — источники свежести</h3>
+              ${detail.gates ? `
+                <div style="padding: 16px; background: ${detail.gates.freshness_gate_passed ? 'rgba(121,226,155,0.1)' : 'rgba(255,107,129,0.1)'}; border-radius: 12px; margin-bottom: 20px; border-left: 3px solid ${detail.gates.freshness_gate_passed ? 'var(--green)' : 'var(--red)'};">
+                  <div style="font-weight: 600; color: ${detail.gates.freshness_gate_passed ? 'var(--green)' : 'var(--red)'}; margin-bottom: 8px;">
+                    ${detail.gates.freshness_gate_passed ? '✅ Gate пройден' : '❌ Gate не пройден'}
+                  </div>
+                  <div style="font-size: 13px; color: var(--text);">${esc(detail.gates.freshness_gate_reason_ru || '')}</div>
+                </div>
+              ` : ''}
+              <div style="padding: 16px; background: rgba(0,0,0,0.2); border-radius: 12px;">
+                <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">Условия прохождения Freshness Gate:</div>
+                <ul style="margin: 0; padding-left: 20px; color: var(--text); line-height: 1.8;">
+                  <li>Страница Steam создана/опубликована < 6 месяцев</li>
+                  <li>Внешний сигнал намерения < 60 дней (Discord, Twitter, Reddit, сайт)</li>
+                  <li>Статус demo / coming soon / early access</li>
+                  <li>Участие в фестивале < 90 дней</li>
+                </ul>
+              </div>
+            </div>
+            
+            <!-- Риски (Success Penalty) -->
+            <div id="deal-tab-risks" class="deal-tab-content" style="display: none;">
+              <h3 style="margin-bottom: 16px;">Риски — почему может быть не сделкой</h3>
+              ${detail.gates && detail.gates.success_penalty_applied ? `
+                <div style="padding: 16px; background: rgba(255,184,107,0.1); border-radius: 12px; margin-bottom: 20px; border-left: 3px solid var(--orange);">
+                  <div style="font-weight: 600; color: var(--orange); margin-bottom: 8px;">⚠️ Success Penalty применён</div>
+                  <div style="font-size: 13px; color: var(--text); margin-bottom: 8px;">Множитель: ×${detail.gates.success_penalty_multiplier}</div>
+                  <div style="font-size: 13px; color: var(--text);">${esc(detail.gates.success_penalty_reason_ru || '')}</div>
+                </div>
+              ` : `
+                <div style="padding: 16px; background: rgba(121,226,155,0.1); border-radius: 12px; margin-bottom: 20px; border-left: 3px solid var(--green);">
+                  <div style="font-weight: 600; color: var(--green);">✅ Success Penalty не применён</div>
+                  <div style="font-size: 13px; color: var(--text); margin-top: 8px;">Игра не попадает под критерии "старая успешная"</div>
+                </div>
+              `}
+              <div style="padding: 16px; background: rgba(0,0,0,0.2); border-radius: 12px;">
+                <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">Критерии Success Penalty:</div>
+                <ul style="margin: 0; padding-left: 20px; color: var(--text); line-height: 1.8;">
+                  <li>Выпущена > 18-24 месяцев</li>
+                  <li>И имеет высокий total reviews (≥ 2000)</li>
+                  <li>Или устойчиво высокий рейтинг (≥ 90% при ≥ 1000 отзывов)</li>
+                  <li>Или высокую активность (≥ 200 отзывов за 30 дней)</li>
+                </ul>
+              </div>
+            </div>
+            
+            <!-- Источники и ссылки -->
+            <div id="deal-tab-sources" class="deal-tab-content" style="display: none;">
+              <h3 style="margin-bottom: 16px;">Источники и ссылки</h3>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div style="padding: 16px; background: rgba(0,0,0,0.2); border-radius: 12px;">
+                  <div style="font-weight: 600; margin-bottom: 8px;">Steam</div>
+                  <a href="${esc(detail.steam_url || `https://store.steampowered.com/app/${appId}/`)}" target="_blank" style="color: var(--blue); text-decoration: none;">${esc(detail.steam_url || `https://store.steampowered.com/app/${appId}/`)}</a>
+                </div>
+                ${detail.behavioral_signals && detail.behavioral_signals.length > 0 ? detail.behavioral_signals.filter(s => s.url).map(s => `
+                  <div style="padding: 16px; background: rgba(0,0,0,0.2); border-radius: 12px;">
+                    <div style="font-weight: 600; margin-bottom: 8px;">${esc(s.source || 'unknown')}</div>
+                    <a href="${esc(s.url)}" target="_blank" style="color: var(--blue); text-decoration: none; font-size: 12px; word-break: break-all;">${esc(s.url)}</a>
+                  </div>
+                `).join('') : ''}
+              </div>
+            </div>
+            
+            <!-- Плейбуки -->
+            <div id="deal-tab-playbooks" class="deal-tab-content" style="display: none;">
+              <h3 style="margin-bottom: 16px;">Плейбуки действий</h3>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <button class="btn" style="padding: 12px; text-align: left;" onclick="alert('Request Pitch Deck')">📄 Запросить Pitch Deck</button>
+                <button class="btn" style="padding: 12px; text-align: left;" onclick="alert('Request Steamworks Metrics')">📊 Запросить Steamworks Metrics</button>
+                <button class="btn" style="padding: 12px; text-align: left;" onclick="alert('Send Offer Template')">✉️ Отправить шаблон предложения</button>
+                <button class="btn" style="padding: 12px; text-align: left;" onclick="alert('Book Call')">📅 Забронировать звонок</button>
+                <button class="btn" style="padding: 12px; text-align: left;" onclick="alert('Add to Watchlist')">👁️ Добавить в Watchlist</button>
+              </div>
+            </div>
+            
+            <!-- Почему Quality (legacy, можно оставить) -->
+            <div id="deal-tab-quality" class="deal-tab-content" style="display: none;">
+              <h3 style="margin-bottom: 16px;">Факторы Quality Score</h3>
+              <table class="table" style="margin-top: 12px;">
+                <thead>
+                  <tr>
+                    <th>Фактор</th>
+                    <th>Баллы</th>
+                    <th>Источник</th>
+                    <th>Доказательство</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${(detail.quality_breakdown || []).map(item => `
+                    <tr>
+                      <td>${esc(item.label_ru || '—')}</td>
+                      <td style="color: ${item.points > 0 ? 'var(--green)' : 'var(--muted)'};">+${item.points || 0}</td>
+                      <td style="font-size: 11px; color: var(--muted);">${esc(item.source || '—')}</td>
+                      <td style="font-size: 11px; color: var(--muted); max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${esc(item.evidence || '—')}</td>
+                    </tr>
+                  `).join('')}
+                  ${(detail.quality_breakdown || []).length === 0 ? '<tr><td colspan="4" style="text-align: center; color: var(--muted); padding: 20px;">Нет данных</td></tr>' : ''}
+                </tbody>
+              </table>
+            </div>
+            
+            <!-- Сигналы и ссылки -->
+            <div id="deal-tab-signals" class="deal-tab-content" style="display: none;">
+              <h3 style="margin-bottom: 16px;">Ссылки</h3>
+              <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px;">
+                <a href="${esc(detail.steam_url || `https://store.steampowered.com/app/${appId}/`)}" target="_blank" style="color: var(--blue); text-decoration: none; padding: 12px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+                  🔗 Steam Store Page
+                </a>
+                ${detail.external_links?.website ? `<a href="${esc(detail.external_links.website)}" target="_blank" style="color: var(--blue); text-decoration: none; padding: 12px; background: rgba(0,0,0,0.2); border-radius: 8px;">🌐 Website</a>` : ''}
+                ${detail.external_links?.discord ? `<a href="${esc(detail.external_links.discord)}" target="_blank" style="color: var(--blue); text-decoration: none; padding: 12px; background: rgba(0,0,0,0.2); border-radius: 8px;">💬 Discord</a>` : ''}
+              </div>
+              
+              <h3 style="margin-bottom: 16px; margin-top: 32px;">Внешние сигналы (${detail.signals_count || 0})</h3>
+              ${(detail.signals || []).length > 0 ? `
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                  ${detail.signals.map(s => `
+                    <div style="padding: 12px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+                      <div style="font-weight: 600; margin-bottom: 4px;">${esc(s.source || 'unknown')}</div>
+                      ${s.url ? `<a href="${esc(s.url)}" target="_blank" style="color: var(--blue); font-size: 12px;">${esc(s.url)}</a>` : ''}
+                      ${s.text ? `<div style="font-size: 12px; color: var(--muted); margin-top: 4px;">${esc(s.text.substring(0, 200))}${s.text.length > 200 ? '...' : ''}</div>` : ''}
+                    </div>
+                  `).join('')}
+                </div>
+              ` : '<div style="color: var(--muted); padding: 20px; text-align: center;">Нет внешних сигналов</div>'}
+            </div>
+            
+            <!-- Плейбуки -->
+            <div id="deal-tab-playbooks" class="deal-tab-content" style="display: none;">
+              <h3 style="margin-bottom: 16px;">Действия</h3>
+              <div style="display: flex; flex-direction: column; gap: 12px;">
+                <button class="btn" onclick="dealAction('pitch_deck', ${appId})" style="width: 100%; text-align: left; padding: 12px;">
+                  📄 Запросить Pitch Deck
+                </button>
+                <button class="btn" onclick="dealAction('steamworks', ${appId})" style="width: 100%; text-align: left; padding: 12px;">
+                  📊 Запросить Steamworks метрики
+                </button>
+                <button class="btn" onclick="dealAction('proposal', ${appId})" style="width: 100%; text-align: left; padding: 12px;">
+                  📧 Отправить шаблон предложения (rev-share / investment / marketing-only)
+                </button>
+                <button class="btn" onclick="dealAction('call', ${appId})" style="width: 100%; text-align: left; padding: 12px;">
+                  📞 Забронировать звонок
+                </button>
+                <button class="btn" onclick="dealAction('watchlist', ${appId})" style="width: 100%; text-align: left; padding: 12px;">
+                  ⭐ Добавить в Watchlist
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+    } catch (e) {
+      console.error("Failed to load deal detail:", e);
+      if (content) {
+        content.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--red);">Ошибка загрузки: ${esc(e.message)}</div>`;
+      }
+    }
+  }
+  
+  function switchDealTab(tabName) {
+    // Скрываем все вкладки
+    document.querySelectorAll('.deal-tab-content').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.deal-tab-btn').forEach(el => el.classList.remove('active'));
+    
+    // Показываем выбранную
+    const tabContent = qs(`#deal-tab-${tabName}`);
+    const tabBtn = document.querySelector(`.deal-tab-btn[data-tab="${tabName}"]`);
+    if (tabContent) tabContent.style.display = 'block';
+    if (tabBtn) tabBtn.classList.add('active');
+  }
+  
+  function dealAction(action, appId) {
+    // TODO: Реализовать действия через API
+    alert(`Действие "${action}" для приложения ${appId} (пока не реализовано)`);
+  }
+  
+  function showDealActions(appId) {
+    showDealDetail(appId);
+  }
+
+  // ==========================================
+  // Discord Import
+  // ==========================================
+  function showDiscordImport() {
+    const modal = qs("#discord-import-modal");
+    if (!modal) {
+      console.error("Modal #discord-import-modal not found");
+      return;
+    }
+    modal.style.display = "flex";
+    
+    // Очищаем форму
+    qs("#discord-import-text").value = "";
+    qs("#discord-import-result").innerHTML = "";
+  }
+
+  async function submitDiscordImport() {
+    const textarea = qs("#discord-import-text");
+    const resultDiv = qs("#discord-import-result");
+    const submitBtn = qs("#discord-import-submit");
+    
+    const rawText = textarea.value.trim();
+    if (!rawText) {
+      resultDiv.innerHTML = "<div style='color: var(--orange);'>Введите текст из Discord</div>";
+      return;
+    }
+    
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Импорт...";
+    resultDiv.innerHTML = "<div style='color: var(--muted);'>Обработка...</div>";
+    
+    try {
+      const response = await fetch(`${API}/deals/signals/import_discord`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ raw_text: rawText })
+      });
+      
+      const data = await response.json();
+      
+      if (data.status === "ok") {
+        resultDiv.innerHTML = `
+          <div style='color: var(--green); margin-bottom: 8px;'>✅ Сигнал сохранён</div>
+          <div style='font-size: 13px; color: var(--muted);'>
+            Найдено keywords: ${data.matched?.length || 0}<br>
+            Извлечено app_id: ${data.extracted_app_ids?.length || 0}<br>
+            Intent strength: ${data.intent_strength || 0}/5
+          </div>
+        `;
+        textarea.value = "";
+        
+        // Обновляем список deals через 1 секунду
+        setTimeout(() => {
+          loadDeals();
+        }, 1000);
+      } else if (data.status === "no_match") {
+        resultDiv.innerHTML = `
+          <div style='color: var(--orange); margin-bottom: 8px;'>⚠️ Не найдены keywords намерения</div>
+          <div style='font-size: 13px; color: var(--muted);'>
+            В тексте не обнаружены фразы типа "looking for publisher", "seeking funding" и т.п.
+          </div>
+        `;
+      } else {
+        resultDiv.innerHTML = `<div style='color: var(--red);'>Ошибка: ${data.message || data.error || "Неизвестная ошибка"}</div>`;
+      }
+    } catch (error) {
+      resultDiv.innerHTML = `<div style='color: var(--red);'>Ошибка: ${error.message}</div>`;
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Импортировать";
     }
   }
 
@@ -2381,5 +2912,90 @@
   // loadSystem() будет вызван через switchTab() при активации вкладки "system"
     </script>
   </div> <!-- wrap -->
-</body>
+  <!-- Модальное окно для деталей сделки -->
+  <div id="deal-detail-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 10000; align-items: center; justify-content: center; padding: 20px;">
+    <div style="background: var(--bg); border-radius: 16px; max-width: 900px; width: 100%; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.5);">
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 1px solid var(--stroke);">
+        <h2 style="margin: 0; font-size: 20px;">Карточка сделки</h2>
+        <button onclick="closeDealModal()" style="background: none; border: none; color: var(--text); font-size: 24px; cursor: pointer; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 8px; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='none'">×</button>
+      </div>
+      <div id="deal-detail-content" style="padding: 24px; overflow-y: auto; flex: 1;">
+        <!-- Контент загружается динамически -->
+      </div>
+    </div>
+  </div>
+  
+  <!-- Модальное окно для импорта Discord -->
+  <div id="discord-import-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 10001; align-items: center; justify-content: center; padding: 20px;">
+    <div style="background: var(--bg); border-radius: 16px; max-width: 600px; width: 100%; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.5);">
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 1px solid var(--stroke);">
+        <h2 style="margin: 0; font-size: 20px;">📥 Импорт из Discord</h2>
+        <button onclick="document.getElementById('discord-import-modal').style.display='none'" style="background: none; border: none; color: var(--text); font-size: 24px; cursor: pointer; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 8px; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='none'">×</button>
+      </div>
+      <div style="padding: 24px; overflow-y: auto; flex: 1;">
+        <div style="margin-bottom: 16px; color: var(--muted); font-size: 14px;">
+          Вставьте текст из Discord сообщения. Система найдёт keywords намерения издателя и извлечёт Steam app_id из ссылок.
+        </div>
+        <textarea id="discord-import-text" placeholder="Вставьте текст из Discord..." style="width: 100%; min-height: 200px; padding: 12px; border-radius: 8px; border: 1px solid var(--stroke); background: rgba(0,0,0,0.25); color: var(--text); font-size: 14px; font-family: inherit; resize: vertical; outline: none;"></textarea>
+        <div id="discord-import-result" style="margin-top: 16px; min-height: 40px;"></div>
+        <div style="display: flex; gap: 12px; margin-top: 20px;">
+          <button id="discord-import-submit" onclick="submitDiscordImport()" class="btn primary" style="flex: 1;">Импортировать</button>
+          <button onclick="document.getElementById('discord-import-modal').style.display='none'" class="btn" style="flex: 0 0 auto;">Отмена</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <style>
+    .deal-tab-btn {
+      padding: 8px 16px;
+      background: rgba(0,0,0,0.2);
+      border: 1px solid var(--stroke);
+      border-radius: 8px;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    .deal-tab-btn:hover {
+      background: rgba(255,255,255,0.1);
+    }
+    .deal-tab-btn.active {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: white;
+    }
+    .deal-tab-content {
+      animation: fadeIn 0.2s;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+  </style>
+  
+  <script>
+    function closeDealModal() {
+      const modal = document.getElementById("deal-detail-modal");
+      if (modal) {
+        modal.style.display = "none";
+      }
+    }
+    
+    // Закрытие по клику вне модального окна
+    document.getElementById("deal-detail-modal")?.addEventListener("click", function(e) {
+      if (e.target === this) {
+        closeDealModal();
+      }
+    });
+    
+    // Закрытие по Escape
+    document.addEventListener("keydown", function(e) {
+      if (e.key === "Escape") {
+        closeDealModal();
+      }
+    });
+  </script>
+  
+  </body>
 </html>

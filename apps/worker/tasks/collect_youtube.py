@@ -10,7 +10,6 @@ from apps.db.models_investor import ExternalVideo, ExternalCommentSample
 from sqlalchemy import select
 from datetime import datetime
 import logging
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +34,11 @@ def collect_youtube_task(game_id: str, max_videos: int = 10, comment_limit: int 
     }
     
     try:
-        # Проверить наличие API key
-        api_key = os.getenv("YOUTUBE_API_KEY")
-        use_mock = os.getenv("YOUTUBE_MOCK_MODE", "false").lower() == "true"
+        from apps.worker.config.external_apis import YOUTUBE_API_KEY, YOUTUBE_MOCK_MODE
         
-        if not api_key or api_key == "your_youtube_api_key_here":
-            if not use_mock:
+        # Проверить наличие API key
+        if not YOUTUBE_API_KEY or YOUTUBE_API_KEY == "your_youtube_api_key_here":
+            if not YOUTUBE_MOCK_MODE:
                 logger.warning("YouTube API key not configured, skipping collection")
                 return {
                     "status": "skipped",
@@ -62,12 +60,12 @@ def collect_youtube_task(game_id: str, max_videos: int = 10, comment_limit: int 
             logger.info(f"Collecting YouTube data for: {game.title}")
             
             # 2. Инициализировать YouTube client
-            youtube = YouTubeClient(api_key=api_key)
+            youtube = YouTubeClient(api_key=YOUTUBE_API_KEY)
             
             # 3. Поиск видео
             search_query = f"{game.title} game trailer gameplay"
             
-            if use_mock:
+            if YOUTUBE_MOCK_MODE:
                 # Mock данные для тестирования
                 videos = [
                     {
@@ -137,7 +135,7 @@ def collect_youtube_task(game_id: str, max_videos: int = 10, comment_limit: int 
                     
                     # 5. Получить комментарии
                     if video_data['comment_count'] > 0:
-                        if use_mock:
+                        if YOUTUBE_MOCK_MODE:
                             # Mock комментарии
                             comments = [
                                 {
