@@ -87,7 +87,6 @@ async def get_deals_list(
     min_intent_score: int = Query(0, ge=0, le=100),
     min_quality_score: int = Query(0, ge=0, le=100),
     stage: Optional[str] = Query(None, description="Фильтр по stage"),
-    synthetic_only: bool = Query(False, description="Только игры с синтетическими сигналами"),
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
     """
@@ -97,20 +96,6 @@ async def get_deals_list(
         # Определяем реальное имя колонки app_id в steam_review_daily (один раз)
         app_id_col = detect_steam_review_app_id_column(db)
         logger.info(f"Using app_id column in steam_review_daily: {app_id_col}")
-        
-        # Фильтр по синтетическим сигналам (если synthetic_only=true)
-        synthetic_filter = ""
-        if synthetic_only:
-            synthetic_filter = """
-              AND EXISTS (
-                SELECT 1 FROM deal_intent_signal s
-                WHERE s.app_id = d.app_id
-                  AND (
-                    s.text ILIKE '[SYNTHETIC]%%'
-                    OR s.url ILIKE '%%synthetic_%%'
-                  )
-              )
-            """
         
         # SQL запрос для получения данных (БЕЗ фильтров по score для подсчёта total)
         # ВАЖНО: JOIN с steam_app_cache и games для получения реальных названий игр
@@ -167,7 +152,6 @@ async def get_deals_list(
               -- Фильтр по ТЗ: разрешённые стадии
               AND d.stage IN ('coming_soon', 'demo', 'early_access', 'released')
             {f"AND d.stage = :stage" if stage else ""}
-            {synthetic_filter}
         """)
         total_params = {}
         if stage:
@@ -261,19 +245,18 @@ async def get_deals_list(
               )
               -- Gate v2.0: Анти-успех фильтр (отсечение "им не нужен издатель")
               AND NOT (
-                -- Уже успешные игры исключаем (NULL-safe)
-                (COALESCE(srd.all_reviews_count, 0) >= 2000)
+                -- Уже успешные игры исключаем
+                (srd.all_reviews_count >= 2000)
                 OR
-                (COALESCE(srd.recent_reviews_count_30d, 0) >= 200)
+                (srd.recent_reviews_count_30d >= 200)
                 OR
-                ((COALESCE(srd.all_positive_percent, 0) >= 90) AND (COALESCE(srd.all_reviews_count, 0) >= 1000))
+                ((srd.all_positive_percent >= 90) AND (srd.all_reviews_count >= 1000))
               )
               -- Фильтр по ТЗ: разрешённые стадии
               AND d.stage IN ('coming_soon', 'demo', 'early_access', 'released')
               -- Data Quality Gate: intent_score > 0 OR quality_score > 0
               AND (d.intent_score > 0 OR d.quality_score > 0)
               {f"AND d.stage = :stage" if stage else ""}
-            {synthetic_filter}
             ORDER BY d.intent_score DESC, d.quality_score DESC
             LIMIT :limit
         """)
@@ -368,6 +351,47 @@ async def get_deals_list(
             # v3.1: Intent Freshness Gate - проверяем свежесть намерения
             app_id = row["app_id"]
             signals = signals_by_app.get(app_id, [])
+# [DISABLED] legacy strict-old-success block (conflicts with check_intent_freshness_gate v3)
+#             
+# DISABLED:             # v3.1: СТРОГАЯ проверка старых успешных игр
+# DISABLED:             # Если release_date < now - 18 месяцев И нет behavioral_signals за последние 60 дней → исключить
+# DISABLED:             if release_date_obj:
+# DISABLED:                 age_days = (date.today() - release_date_obj).days
+# DISABLED:                 if age_days > 540:  # > 18 месяцев
+# DISABLED:                     # Проверяем наличие behavioral signals за последние 60 дней
+# DISABLED:                     has_recent_behavioral = False
+# DISABLED:                     now = datetime.utcnow()
+# DISABLED:                     for signal in signals:
+# DISABLED:                         signal_source = (signal.get("source", "") or "").lower()
+# DISABLED:                         if signal_source not in BEHAVIORAL_INTENT_SOURCES:
+# DISABLED:                             continue
+                        
+## DISABLED:                         signal_text = signal.get("text", "") or ""
+## DISABLED:                         if not signal_text:
+## DISABLED:                             continue
+## DISABLED:                         
+## DISABLED:                         # Проверяем наличие behavioral keywords
+## DISABLED:                         detected = detect_intent_keywords(signal_text)
+## DISABLED:                         if detected:
+## DISABLED:                             # Проверяем свежесть сигнала
+## DISABLED:                             signal_date = signal.get("published_at") or signal.get("created_at")
+## DISABLED:                             if signal_date:
+## DISABLED:                                 try:
+## DISABLED:                                     if isinstance(signal_date, str):
+## DISABLED:                                         signal_date = datetime.fromisoformat(signal_date.replace('Z', '+00:00'))
+## DISABLED:                                     if isinstance(signal_date, datetime):
+## DISABLED:                                         days_ago = (now - signal_date.replace(tzinfo=None)).days
+## DISABLED:                                         if days_ago <= 60:
+## DISABLED:                                             has_recent_behavioral = True
+## DISABLED:                                             break
+## DISABLED:                                 except Exception:
+## DISABLED:                                     pass
+## DISABLED:                     
+## DISABLED:                     if not has_recent_behavioral:
+                        excluded_count += 1
+                        excluded_reasons["old_without_behavioral"] = excluded_reasons.get("old_without_behavioral", 0) + 1
+                        logger.debug(f"Excluded app_id {app_id}: old game ({age_days} days) without recent behavioral signals")
+                        continue
             
             # Подготавливаем app_data для gates
             app_data = {
