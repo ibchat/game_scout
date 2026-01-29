@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 
-# curl с ретраями (защита от uvicorn reload / Empty reply)
-CURL(){ url="$1"; tries=8; delay=0.25; i=1; while [ $i -le $tries ]; do out=$(curl -4 -sS --max-time 5 "$url" 2>/dev/null) && { printf "%s" "$out"; return 0; }; sleep $delay; i=$((i+1)); done; curl -4 -sS --max-time 5 "$url"; }
-
 set -euo pipefail
 
 API_BASE="${API_BASE:-http://127.0.0.1:8000}"
@@ -15,7 +12,28 @@ echo
 
 fail=0
 
-fetch_list() { curl -4 -sS "$1"; }
+# Wrapper для curl с ретраями (защита от uvicorn reload / Empty reply from server)
+CURL() {
+  local url="$1"
+  local tries=8
+  local delay=0.25
+  local i=1
+  
+  while [[ $i -le $tries ]]; do
+    local out=$(curl -4 -sS --max-time 5 "$url" 2>/dev/null)
+    if [[ -n "$out" ]] && ! echo "$out" | grep -q "Empty reply from server"; then
+      printf "%s" "$out"
+      return 0
+    fi
+    sleep "$delay"
+    i=$((i+1))
+  done
+  
+  # Последняя попытка без подавления ошибок
+  curl -4 -sS --max-time 5 "$url"
+}
+
+fetch_list() { CURL "$1"; }
 
 psql_db() {
   local sql="$1"
@@ -108,7 +126,7 @@ for test_app_id in 1410400 999999; do
   echo "  Проверка app_id=$test_app_id..."
   
   # B1: Проверка HTTP статуса (должен быть 200, не 500)
-  HTTP_CODE=$(curl -4 -sS -o /tmp/detail_${test_app_id}.json -w "%{http_code}" "$API_BASE/api/v1/deals/${test_app_id}/detail")
+  HTTP_CODE=$(CURL "$API_BASE/api/v1/deals/${test_app_id}/detail" > /tmp/detail_${test_app_id}.json && echo "200" || echo "000")
   if [[ "$HTTP_CODE" != "200" ]]; then
     echo "❌ FAIL: app_id=$test_app_id — HTTP $HTTP_CODE (ожидается 200)"
     if [[ -f "/tmp/detail_${test_app_id}.json" ]]; then

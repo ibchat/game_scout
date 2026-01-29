@@ -3,7 +3,7 @@ Deals / Publisher Intent API Router
 Отдельный слой для определения намерений издателей.
 Не зависит от TrendsBrain или Emerging engine.
 """
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -27,6 +27,480 @@ from apps.worker.config.deal_intent_reasons_ru import translate_reasons_list, tr
 from apps.worker.config.deal_intent_config import BEHAVIORAL_INTENT_SOURCES
 
 logger = logging.getLogger(__name__)
+
+# Константы типов издательского интереса (коды)
+PUBLISHER_TYPE_SCOUT_FUND = "scout_fund"
+PUBLISHER_TYPE_GENRE_PUBLISHER = "genre_publisher"
+PUBLISHER_TYPE_MARKETING_PUBLISHER = "marketing_publisher"
+PUBLISHER_TYPE_TURNAROUND_PUBLISHER = "turnaround_publisher"
+PUBLISHER_TYPE_OPERATOR_PUBLISHER = "operator_publisher"
+PUBLISHER_TYPE_INFLUENCER_PARTNER = "influencer_partner"
+
+# Маппинг code → RU label (для API остаётся русский)
+PUBLISHER_TYPE_LABEL_RU = {
+    PUBLISHER_TYPE_SCOUT_FUND: "Скаут/фонд (ранние стадии, портфель)",
+    PUBLISHER_TYPE_GENRE_PUBLISHER: "Паблишер по жанру/нишевый куратор",
+    PUBLISHER_TYPE_MARKETING_PUBLISHER: "Маркетинговый издатель (performance / UA)",
+    PUBLISHER_TYPE_TURNAROUND_PUBLISHER: "Паблишер \"спасатель\" (late-stage turnaround)",
+    PUBLISHER_TYPE_OPERATOR_PUBLISHER: "Паблишер-оператор (live ops / контент)",
+    PUBLISHER_TYPE_INFLUENCER_PARTNER: "Инфлюенсер/медиа-партнёр (аудитория/контент)"
+}
+
+
+def map_publisher_status_label(status_code: str) -> str:
+    """
+    Возвращает человекочитаемый текст для publisher_status_code.
+    """
+    mapping = {
+        "has_publisher": "Есть издатель",
+        "self_published": "Самоиздание",
+        "unknown": "Неизвестно"
+    }
+    return mapping.get(status_code, "Неизвестно")
+
+
+def compute_publisher_status(publishers: Any) -> Literal["has_publisher", "self_published", "unknown"]:
+    """
+    Вычисляет publisher_status на основе steam_app_cache.publishers.
+    Единственный источник истины для статуса издателя.
+    
+    Правила:
+    - NULL → unknown (данные не загружены)
+    - [] → self_published (явно без издателя)
+    - [непустой массив] → has_publisher (есть издатель)
+    """
+    if publishers is None:
+        return "unknown"
+    
+    # Если это JSONB массив или список Python
+    if isinstance(publishers, list):
+        if len(publishers) == 0:
+            return "self_published"
+        else:
+            return "has_publisher"
+    
+    # Если это строка (JSON), пытаемся распарсить
+    if isinstance(publishers, str):
+        try:
+            import json
+            parsed = json.loads(publishers)
+            if isinstance(parsed, list):
+                if len(parsed) == 0:
+                    return "self_published"
+                else:
+                    return "has_publisher"
+        except:
+            pass
+    
+    # По умолчанию unknown
+    return "unknown"
+
+
+def build_publisher_interest(
+    archetype: str,
+    app_data: Dict[str, Any],
+    scores: Dict[str, Any],
+    temporal_context: str
+) -> Dict[str, Any]:
+    """
+    Формирует publisher_interest на основе архетипа.
+    Чистая функция, не влияет на gates, scores, verdict.
+    """
+    intent_score = scores.get("intent_score", 0)
+    quality_score = scores.get("quality_score", 0)
+    stage = app_data.get("stage", "")
+    publisher_status = app_data.get("publisher_status", "unknown")
+    has_publisher = publisher_status == "has_publisher"
+    
+    who_might_care = []
+    why_now = []
+    risk_flags = []
+    next_actions = []
+    
+    # Добавляем фразу о свежести сигналов, если applicable
+    fresh_signal_note = ""
+    if temporal_context == "recent_interest":
+        fresh_signal_note = "Сигналы свежие — контактировать сейчас. "
+    
+    # C1: Если publisher_status == has_publisher → ОБЯЗАТЕЛЬНО добавить risk_flag
+    if has_publisher:
+        risk_flags.append("У игры уже есть издатель — запрос может означать co-pub, маркетинг, или рестарт релиза")
+    
+    if archetype == "early_publisher_search":
+        # Формируем коды по правилам из TZ_BRAIN_EVOLUTION.md п.6.2
+        who_might_care_codes = [
+            PUBLISHER_TYPE_SCOUT_FUND,
+            PUBLISHER_TYPE_GENRE_PUBLISHER,
+            PUBLISHER_TYPE_MARKETING_PUBLISHER
+        ]
+        # Преобразуем коды в RU labels
+        who_might_care = [PUBLISHER_TYPE_LABEL_RU[code] for code in who_might_care_codes]
+        
+        why_now = [
+            fresh_signal_note + f"Команда ищет {'издательского партнёра / co-publishing / маркетингового партнёра' if has_publisher else 'партнёра'} до масштабирования — дешевле и быстрее договориться сейчас.",
+            "Можно повлиять на позиционирование/маркетинг до выхода."
+        ]
+        
+        if quality_score == 0:
+            risk_flags.append("Нет подтверждения качества по метрикам — нужен быстрый аудит демо/вишлистов/конверсий.")
+        
+        next_actions = [
+            "Запросить питч-дек + бюджет + план производства.",
+            "Попросить билд/демо и список KPI (вишлисты, конверсия, удержание)."
+        ]
+    
+    elif archetype == "late_pivot_after_release":
+        # Формируем коды по правилам из TZ_BRAIN_EVOLUTION.md п.6.2
+        who_might_care_codes = [
+            PUBLISHER_TYPE_TURNAROUND_PUBLISHER,
+            PUBLISHER_TYPE_MARKETING_PUBLISHER,
+            PUBLISHER_TYPE_OPERATOR_PUBLISHER
+        ]
+        # Преобразуем коды в RU labels
+        who_might_care = [PUBLISHER_TYPE_LABEL_RU[code] for code in who_might_care_codes]
+        
+        why_now = [
+            fresh_signal_note + f"Есть свежий запрос на {'издательского партнёра / co-publishing / маркетингового партнёра / спасение релиза' if has_publisher else 'издателя'} после релиза — значит, команда готова к изменениям.",
+            "Окно для перезапуска/скидок/ивентов сейчас самое короткое."
+        ]
+        
+        risk_flags.append("После релиза сложнее менять продукт, нужен чёткий план перезапуска.")
+        
+        next_actions = [
+            "Проверить причины слабых продаж: страница/трейлер/цена/теги/онбординг.",
+            "Сделать план '90 дней': скидки + инфлюенсеры + обновления."
+        ]
+    
+    elif archetype == "weak_signal_exploration":
+        # Формируем коды по правилам из TZ_BRAIN_EVOLUTION.md п.6.2
+        who_might_care_codes = [
+            PUBLISHER_TYPE_SCOUT_FUND,
+            PUBLISHER_TYPE_GENRE_PUBLISHER
+        ]
+        # Преобразуем коды в RU labels
+        who_might_care = [PUBLISHER_TYPE_LABEL_RU[code] for code in who_might_care_codes]
+        
+        why_now = [
+            "Сигналы устарели — интерес может быть неактуален; нужна перепроверка."
+        ]
+        
+        risk_flags.append("Сигналы старые (>90 дней) — возможно, уже нашли партнёра или бросили проект.")
+        
+        next_actions = [
+            "Перепроверить актуальность: сайт/соцсети/страница Steam, запросить статус."
+        ]
+    
+    elif archetype == "opportunistic_outreach":
+        # Формируем коды по правилам из TZ_BRAIN_EVOLUTION.md п.6.2
+        who_might_care_codes = [
+            PUBLISHER_TYPE_INFLUENCER_PARTNER,
+            PUBLISHER_TYPE_MARKETING_PUBLISHER
+        ]
+        # Преобразуем коды в RU labels
+        who_might_care = [PUBLISHER_TYPE_LABEL_RU[code] for code in who_might_care_codes]
+        
+        why_now = [
+            fresh_signal_note + "Есть признаки интереса, но контекст размыт — можно дешево проверить контакт."
+        ]
+        
+        risk_flags.append("Непонятна стадия/готовность/качество — риск пустой коммуникации.")
+        
+        next_actions = [
+            "Сделать короткий outreach: 3 вопроса (статус, билд, KPI) + запрос материалов."
+        ]
+    
+    elif archetype == "unclear_intent":
+        # Формируем коды по правилам из TZ_BRAIN_EVOLUTION.md п.6.2
+        # scout_fund только если intent_score > 0, иначе пусто
+        who_might_care_codes = []
+        if intent_score > 0:
+            who_might_care_codes = [PUBLISHER_TYPE_SCOUT_FUND]
+        # Преобразуем коды в RU labels
+        who_might_care = [PUBLISHER_TYPE_LABEL_RU[code] for code in who_might_care_codes]
+        
+        why_now = [
+            "Данных недостаточно для интерпретации намерения."
+        ]
+        
+        risk_flags.append("Нет сигналов или дат — нельзя делать выводы.")
+        
+        next_actions = [
+            "Сначала собрать внешние сигналы / обновить источники."
+        ]
+    
+    elif archetype == "high_intent_low_quality":
+        # Формируем коды по правилам из TZ_BRAIN_EVOLUTION.md п.6.2
+        who_might_care_codes = [
+            PUBLISHER_TYPE_MARKETING_PUBLISHER,
+            PUBLISHER_TYPE_INFLUENCER_PARTNER
+        ]
+        # Преобразуем коды в RU labels
+        who_might_care = [PUBLISHER_TYPE_LABEL_RU[code] for code in who_might_care_codes]
+        
+        why_now = [
+            fresh_signal_note + f"Команда явно ищет {'издательского партнёра / co-publishing / маркетингового партнёра' if has_publisher else 'издателя'}, но качество не подтверждено метриками — подходит под быстрый тест."
+        ]
+        
+        risk_flags.append("Высокий риск: качество/потенциал не доказаны.")
+        
+        next_actions = [
+            "Только быстрый скрининг (15–30 минут): страница Steam, трейлер, демо, первые отзывы/метрики."
+        ]
+    
+    else:
+        # Fallback для неизвестных архетипов
+        who_might_care = []
+        why_now = ["Архетип не определён."]
+        risk_flags = []
+        next_actions = []
+    
+    return {
+        "who_might_care": who_might_care,
+        "why_now": why_now,
+        "risk_flags": risk_flags,
+        "next_actions": next_actions
+    }
+
+
+def build_deal_thesis(
+    app_data: Dict[str, Any],
+    signals: List[Dict[str, Any]],
+    scores: Dict[str, Any],
+    gates: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Формирует DealThesis — объяснение, почему объект интересен или неинтересен сейчас.
+    Чистая функция, не влияет на gates, scores, verdict.
+    """
+    # Единые пороги для архетипизации
+    FRESH_DAYS = 60
+    WEAK_DAYS = 90
+    
+    supporting_facts = []
+    counter_facts = []
+    thesis = ""
+    temporal_context = ""
+    
+    # Анализируем behavioral_intent сигналы
+    behavioral_signals = []
+    for signal in signals:
+        signal_text = signal.get("text", "") or ""
+        if signal_text:
+            detected = detect_intent_keywords(signal_text)
+            if detected:
+                signal_date = signal.get("published_at") or signal.get("created_at")
+                days_ago = None
+                if signal_date:
+                    try:
+                        if isinstance(signal_date, str):
+                            signal_date = datetime.fromisoformat(signal_date.replace('Z', '+00:00'))
+                        if isinstance(signal_date, datetime):
+                            days_ago = (datetime.utcnow() - signal_date.replace(tzinfo=None)).days
+                    except:
+                        pass
+                
+                if days_ago is not None:
+                    behavioral_signals.append({
+                        "days_ago": days_ago,
+                        "source": signal.get("source", "unknown"),
+                        "text": signal_text[:100]
+                    })
+    
+    # Определяем temporal_context
+    stage = app_data.get("stage", "")
+    release_date = app_data.get("release_date")
+    is_released = stage == "released"
+    publisher_status = app_data.get("publisher_status", "unknown")  # Получаем publisher_status из app_data
+    
+    if behavioral_signals:
+        valid_signals = [s for s in behavioral_signals if s.get("days_ago") is not None]
+        if valid_signals:
+            latest_signal_days = min(s["days_ago"] for s in valid_signals)
+            if latest_signal_days is not None:
+                if latest_signal_days <= FRESH_DAYS:
+                    temporal_context = "recent_interest"
+                elif latest_signal_days <= 180:
+                    temporal_context = "cooling_down"
+                else:
+                    temporal_context = "stale"
+            else:
+                temporal_context = "unknown"
+        else:
+            temporal_context = "unknown"
+    else:
+        if is_released:
+            temporal_context = "post_release"
+        else:
+            temporal_context = "pre_release_window"
+    
+    # Формируем thesis на основе правил с учетом publisher_status
+    # Если publisher_status == has_publisher И есть behavioral_intent → трактовать как "ищут партнёра/маркетинг"
+    has_publisher = publisher_status == "has_publisher"
+    intent_verb = "ищет издательского партнёра" if has_publisher else "ищет издателя"
+    
+    if behavioral_signals:
+        # Фильтруем только сигналы с валидным days_ago
+        valid_signals = [s for s in behavioral_signals if s.get("days_ago") is not None]
+        if valid_signals:
+            latest_days = min(s["days_ago"] for s in valid_signals)
+            if latest_days is not None:
+                if latest_days < 14:
+                    thesis = f"Активный поиск {'партнёра' if has_publisher else 'издателя'}"
+                    supporting_facts.append(f"Свежие сигналы поиска {'партнёра' if has_publisher else 'издателя'} ({latest_days} дней назад)")
+                elif latest_days <= FRESH_DAYS:
+                    thesis = f"Недавнее намерение найти {'партнёра' if has_publisher else 'издателя'}"
+                    supporting_facts.append(f"Сигналы поиска {'партнёра' if has_publisher else 'издателя'} ({latest_days} дней назад)")
+                elif latest_days > WEAK_DAYS:
+                    thesis = "Устаревшее намерение, слабое продолжение"
+                    counter_facts.append(f"Последний сигнал был {latest_days} дней назад")
+        else:
+            thesis = f"Есть сигналы поиска {'партнёра' if has_publisher else 'издателя'}, но даты не определены"
+            supporting_facts.append("Обнаружены behavioral intent сигналы")
+    else:
+        thesis = f"Нет явных признаков активного поиска {'партнёра' if has_publisher else 'издателя'}"
+        counter_facts.append("Отсутствуют behavioral intent сигналы")
+    
+    # Дополнительные факты на основе stage и intent
+    if behavioral_signals:
+        valid_signals = [s for s in behavioral_signals if s.get("days_ago") is not None]
+        if valid_signals:
+            latest_days = min(s["days_ago"] for s in valid_signals)
+            if latest_days is not None and is_released and latest_days <= FRESH_DAYS:
+                thesis = f"Поздний поворот: {intent_verb} после релиза"
+                supporting_facts.append(f"Игра уже выпущена, но есть свежие сигналы поиска {'партнёра' if has_publisher else 'издателя'}")
+    
+    if stage in ["demo", "coming_soon"] and behavioral_signals:
+        thesis = f"Ранний поиск {'партнёра' if has_publisher else 'издателя'}, хорошее соответствие"
+        supporting_facts.append(f"Стадия {stage} с признаками поиска {'партнёра' if has_publisher else 'издателя'}")
+    
+    # Добавляем факты на основе scores и gates
+    intent_score = scores.get("intent_score", 0)
+    quality_score = scores.get("quality_score", 0)
+    
+    if intent_score > 0:
+        supporting_facts.append(f"Intent score: {intent_score}")
+    else:
+        counter_facts.append("Intent score равен нулю")
+    
+    if quality_score > 0:
+        supporting_facts.append(f"Quality score: {quality_score}")
+    else:
+        counter_facts.append("Quality score равен нулю")
+    
+    # Проверяем gates
+    freshness_gate = gates.get("freshness_gate", {})
+    if not freshness_gate.get("passes", False):
+        counter_facts.append(f"Freshness gate не пройден: {freshness_gate.get('reason', 'неизвестно')}")
+    
+    success_penalty = gates.get("success_penalty", {})
+    if success_penalty.get("penalty_applied", False):
+        counter_facts.append("Применён success penalty (игра уже успешна)")
+    
+    # Вычисляем confidence по детерминированной формуле из TZ_BRAIN_EVOLUTION.md (п.7.1)
+    confidence = 0.0  # Начальное значение base
+    
+    # Определяем latest_days для behavioral_intent
+    latest_days = None
+    valid_signals = [s for s in behavioral_signals if s.get("days_ago") is not None]
+    if valid_signals:
+        latest_days = min(s["days_ago"] for s in valid_signals)
+    
+    # 1. +0.3 если есть свежие behavioral_intent и latest_days <= FRESH_DAYS
+    if latest_days is not None and latest_days <= FRESH_DAYS:
+        confidence += 0.3
+    
+    # 2. +0.2 если stage согласуется с архетипом
+    # (thesis_archetype определится позже, но мы можем проверить stage сейчас)
+    # Для early_publisher_search: stage in (demo, coming_soon)
+    # Для late_pivot_after_release: stage == released
+    # Проверку делаем после определения архетипа, поэтому временно пропускаем
+    
+    # 3. +0.1 если intent_score > 0
+    if intent_score > 0:
+        confidence += 0.1
+    
+    # 4. -0.2 если quality_score == 0
+    if quality_score == 0:
+        confidence -= 0.2
+    
+    # 5. -0.2 если сигналы старше WEAK_DAYS
+    if latest_days is not None and latest_days > WEAK_DAYS:
+        confidence -= 0.2
+    
+    # Определяем thesis_archetype на основе имеющихся данных (жёсткий приоритет правил)
+    thesis_archetype = None  # Сначала не определён
+    
+    intent_score = scores.get("intent_score", 0)
+    quality_score = scores.get("quality_score", 0)
+    
+    # Правило 1: late_pivot_after_release
+    if behavioral_signals:
+        valid_signals = [s for s in behavioral_signals if s.get("days_ago") is not None]
+        if valid_signals:
+            latest_days = min(s["days_ago"] for s in valid_signals)
+            if latest_days is not None:
+                if is_released and latest_days <= FRESH_DAYS:
+                    thesis_archetype = "late_pivot_after_release"
+    
+    # Правило 2: early_publisher_search
+    if thesis_archetype is None and behavioral_signals:
+        valid_signals = [s for s in behavioral_signals if s.get("days_ago") is not None]
+        if valid_signals:
+            latest_days = min(s["days_ago"] for s in valid_signals)
+            if latest_days is not None:
+                if stage in ["demo", "coming_soon", "early_access"] and latest_days <= FRESH_DAYS:
+                    thesis_archetype = "early_publisher_search"
+    
+    # Правило 3: weak_signal_exploration
+    if thesis_archetype is None and behavioral_signals:
+        valid_signals = [s for s in behavioral_signals if s.get("days_ago") is not None]
+        if valid_signals:
+            latest_days = min(s["days_ago"] for s in valid_signals)
+            if latest_days is not None and latest_days > WEAK_DAYS:
+                thesis_archetype = "weak_signal_exploration"
+    
+    # Правило 4: opportunistic_outreach
+    if thesis_archetype is None and behavioral_signals:
+        valid_signals = [s for s in behavioral_signals if s.get("days_ago") is not None]
+        if valid_signals:
+            # Есть сигналы, но не попали в правила 1-3
+            thesis_archetype = "opportunistic_outreach"
+    
+    # Правило 5: unclear_intent
+    if thesis_archetype is None:
+        thesis_archetype = "unclear_intent"
+    
+    # Правило 6: high_intent_low_quality (ТОЛЬКО fallback)
+    if thesis_archetype in ["unclear_intent", "weak_signal_exploration"]:
+        if intent_score > 0 and quality_score == 0:
+            thesis_archetype = "high_intent_low_quality"
+    
+    # 2. +0.2 если stage согласуется с архетипом (продолжение формулы confidence)
+    if thesis_archetype == "early_publisher_search" and stage in ["demo", "coming_soon"]:
+        confidence += 0.2
+    elif thesis_archetype == "late_pivot_after_release" and stage == "released":
+        confidence += 0.2
+    
+    # Финал: clamp(base, 0.0, 1.0)
+    confidence = max(0.0, min(1.0, confidence))
+    
+    # Формируем publisher_interest на основе архетипа
+    publisher_interest = build_publisher_interest(
+        archetype=thesis_archetype,
+        app_data=app_data,
+        scores=scores,
+        temporal_context=temporal_context
+    )
+    
+    return {
+        "thesis": thesis or "Недостаточно данных для формулировки тезиса",
+        "supporting_facts": supporting_facts,
+        "counter_facts": counter_facts,
+        "temporal_context": temporal_context,
+        "confidence": round(confidence, 2),
+        "thesis_archetype": thesis_archetype,
+        "publisher_interest": publisher_interest
+    }
 
 router = APIRouter(prefix="/deals", tags=["Deals / Publisher Intent"])
 
@@ -114,13 +588,14 @@ async def get_deals_list(
         
         # SQL запрос для получения данных (БЕЗ фильтров по score для подсчёта total)
         # ВАЖНО: JOIN с steam_app_cache и games для получения реальных названий игр
-        base_query = text(f"""
+        query = text(f"""
             SELECT 
                 d.app_id,
                 COALESCE(NULLIF(c.name, ''), g.title) as title,
                 COALESCE(NULLIF(c.steam_url, ''), d.steam_url, 'https://store.steampowered.com/app/' || d.app_id::text || '/') as steam_url,
                 d.developer_name,
                 d.publisher_name,
+                c.publishers AS publishers,
                 COALESCE(c.release_date, d.release_date) as release_date,
                 d.stage,
                 d.has_demo,
@@ -217,6 +692,7 @@ async def get_deals_list(
                 COALESCE(NULLIF(c.steam_url, ''), d.steam_url, 'https://store.steampowered.com/app/' || d.app_id::text || '/') as steam_url,
                 d.developer_name,
                 d.publisher_name,
+                c.publishers as publishers,
                 COALESCE(c.release_date, d.release_date) as release_date,
                 d.stage,
                 d.has_demo,
@@ -430,6 +906,11 @@ async def get_deals_list(
             intent_reasons_ru = translate_reasons_list(intent_reasons_raw)
             quality_reasons_ru = translate_reasons_list(quality_reasons_raw)
             
+            # Вычисляем publisher_status_code из steam_app_cache.publishers (единственный источник истины)
+            publishers_raw = row.get("publishers")
+            publisher_status_code = compute_publisher_status(publishers_raw)
+            publisher_status_label = map_publisher_status_label(publisher_status_code)
+            
             games.append({
                 "app_id": app_id,
                 "title": title,
@@ -437,6 +918,8 @@ async def get_deals_list(
                 "steam_url": row["steam_url"] or f"https://store.steampowered.com/app/{app_id}/",
                 "developer": row["developer_name"],
                 "publisher": row["publisher_name"],
+                "publisher_status_code": publisher_status_code,  # Код для программной обработки
+                "publisher_status": publisher_status_label,  # Человекочитаемый текст на русском
                 "stage": row["stage"],
                 "has_demo": row["has_demo"] or False,
                 "price_eur": float(row["price_eur"]) if row["price_eur"] else None,
@@ -658,6 +1141,9 @@ async def get_deal_detail(
                 d.*,
                 COALESCE(NULLIF(c.name, ''), g.title) as title,
                 COALESCE(NULLIF(c.steam_url, ''), d.steam_url) as steam_url,
+                c.publishers as publishers,
+                d.publisher_name,
+                d.developer_name,
                 COALESCE(c.release_date, d.release_date) as release_date,
                 srd.recent_reviews_count_30d,
                 srd.all_positive_percent,
@@ -720,10 +1206,15 @@ async def get_deal_detail(
         
         age_days = (date.today() - release_date_obj).days if release_date_obj else None
         
+        # Вычисляем publisher_status из steam_app_cache.publishers (единственный источник истины)
+        publishers_raw = row.get("publishers")
+        publisher_status = compute_publisher_status(publishers_raw)
+        
         app_data = {
             "app_id": app_id,
             "publisher_name": row.get("publisher_name"),
             "developer_name": row.get("developer_name"),
+            "publisher_status": publisher_status,  # Добавляем publisher_status в app_data
             "stage": row.get("stage"),
             "release_date": release_date_obj,
             "has_demo": row.get("has_demo", False),
@@ -748,15 +1239,13 @@ async def get_deal_detail(
         success_penalty = analysis.get("success_penalty", {})
         verdict = analysis.get("verdict", {})
         
-        # Формируем publisher_status на русском
-        publisher_name = row.get("publisher_name") or ""
-        developer_name = row.get("developer_name") or ""
-        if not publisher_name or publisher_name == "":
-            publisher_status = "Неизвестно"
-        elif publisher_name.lower() == developer_name.lower():
-            publisher_status = "Самоиздание"
-        else:
-            publisher_status = "Есть издатель"
+        # Формируем publisher_status на русском для UI (для обратной совместимости)
+        publisher_status_ru_map = {
+            "has_publisher": "Есть издатель",
+            "self_published": "Самоиздание",
+            "unknown": "Неизвестно"
+        }
+        publisher_status_ru = publisher_status_ru_map.get(publisher_status, "Неизвестно")
         
         # Формируем stage на русском
         stage_ru_map = {
@@ -903,7 +1392,8 @@ async def get_deal_detail(
         # Обеспечиваем минимум 4 элемента
         if len(intent_breakdown) < 4:
             # Добавляем дополнительные факторы
-            if not publisher_name or publisher_name == "":
+            publisher_name = (app_data.get("publisher_name") or "").strip()
+            if not publisher_name:
                 intent_breakdown.append({
                     "label_ru": "Нет издателя на Steam",
                     "points": 12,
@@ -921,7 +1411,7 @@ async def get_deal_detail(
                     "ts": None
                 })
             
-            if row.get("recent_reviews_count_30d", 0) > 0:
+            if (row.get("recent_reviews_count_30d") or 0) > 0:
                 intent_breakdown.append({
                     "label_ru": "Активность отзывов",
                     "points": min(15, row.get("recent_reviews_count_30d", 0) // 10),
@@ -983,7 +1473,7 @@ async def get_deal_detail(
                 })
             
             # Reviews 30d
-            if row.get("recent_reviews_count_30d", 0) > 0:
+            if (row.get("recent_reviews_count_30d") or 0) > 0:
                 count = row.get("recent_reviews_count_30d", 0)
                 log_score = min(15, int(math.log10(count + 1) * 5))
                 quality_breakdown.append({
@@ -1036,7 +1526,8 @@ async def get_deal_detail(
             "title": row.get("title") or f"App {app_id}",
             "steam_url": row.get("steam_url") or f"https://store.steampowered.com/app/{app_id}/",
             "stage": stage_ru,
-            "publisher_status": publisher_status,
+            "publisher_status": publisher_status_ru,  # Для обратной совместимости возвращаем русский вариант
+            "publisher_status_code": publisher_status,  # Добавляем код для программной обработки
             "release_date": release_date_obj.isoformat() if release_date_obj else None,
             "age_days": age_days,
             "intent_score_raw": intent_score_raw,
@@ -1053,7 +1544,13 @@ async def get_deal_detail(
             "intent_breakdown": intent_breakdown[:8],  # Максимум 8 элементов
             "quality_breakdown": quality_breakdown[:8],  # Максимум 8 элементов
             "behavioral_signals": behavioral_signals[:10],  # Последние 10 сигналов
-            "behavioral_last_days": behavioral_last_days
+            "behavioral_last_days": behavioral_last_days,
+            "thesis": build_deal_thesis(
+                app_data=app_data,
+                signals=signals,
+                scores={"intent_score": intent_score_final, "quality_score": quality_score},
+                gates={"freshness_gate": freshness_gate, "success_penalty": success_penalty}
+            )
         }
         
         # Формируем детальный breakdown для intent (минимум 4 элемента)
@@ -1159,7 +1656,7 @@ async def get_deal_detail(
                     "evidence": "steam_app_cache"
                 })
             
-            if row.get("recent_reviews_count_30d", 0) > 0:
+            if (row.get("recent_reviews_count_30d") or 0) > 0:
                 intent_breakdown.append({
                     "label": "Активность отзывов",
                     "delta": min(20, int(row.get("recent_reviews_count_30d", 0) / 5)),
@@ -1247,7 +1744,7 @@ async def get_deal_detail(
                 })
             
             # Reviews 30d
-            if row.get("recent_reviews_count_30d", 0) > 0:
+            if (row.get("recent_reviews_count_30d") or 0) > 0:
                 reviews_30d = row.get("recent_reviews_count_30d", 0)
                 log_reviews = math.log10(reviews_30d + 1)
                 reviews_score = min(30, int(log_reviews * 10))
@@ -1330,6 +1827,14 @@ async def get_deal_detail(
         if not why_in_deals:
             why_in_deals.append("Попало в список по другим критериям")
         
+        # Формируем DealThesis для старого формата ответа
+        thesis_data_legacy = build_deal_thesis(
+            app_data=app_data,
+            signals=signals,
+            scores={"intent_score": row.get("intent_score") or 0, "quality_score": row.get("quality_score") or 0},
+            gates={"freshness_gate": freshness_gate, "success_penalty": success_penalty}
+        )
+        
         return {
             "status": "ok",
             "app_id": app_id,
@@ -1363,7 +1868,8 @@ async def get_deal_detail(
                 },
                 "social": []  # Пока пусто, структура для будущего
             },
-            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None
+            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+            "thesis": thesis_data_legacy
         }
         
     except HTTPException:
