@@ -96,6 +96,195 @@ else
 fi
 echo
 
+# S6. Проверка DealThesis для тест-кейсов
+echo "S6. Проверка DealThesis (thesis_archetype, publisher_interest)..."
+VALID_ARCHETYPES=("early_publisher_search" "late_pivot_after_release" "weak_signal_exploration" "opportunistic_outreach" "unclear_intent" "high_intent_low_quality")
+
+for test_app_id in 1410400 999999; do
+  echo "  Проверка app_id=$test_app_id..."
+  
+  # B1: Проверка HTTP статуса (должен быть 200, не 500)
+  HTTP_CODE=$(curl -4 -sS -o /tmp/detail_${test_app_id}.json -w "%{http_code}" "$API_BASE/api/v1/deals/${test_app_id}/detail")
+  if [[ "$HTTP_CODE" != "200" ]]; then
+    echo "❌ FAIL: app_id=$test_app_id — HTTP $HTTP_CODE (ожидается 200)"
+    if [[ -f "/tmp/detail_${test_app_id}.json" ]]; then
+      echo "  Тело ответа: $(cat /tmp/detail_${test_app_id}.json | head -c 200)"
+    fi
+    fail=1
+    continue
+  else
+    echo "✅ PASS: app_id=$test_app_id — HTTP $HTTP_CODE"
+  fi
+  
+  DETAIL_JSON="$(cat /tmp/detail_${test_app_id}.json)"
+  
+  # Проверка thesis не null
+  THESIS_NULL="$(echo "$DETAIL_JSON" | jq -r '[.thesis // null] | .[0] == null')"
+  if [[ "$THESIS_NULL" == "true" ]]; then
+    echo "❌ FAIL: app_id=$test_app_id — thesis is null"
+    fail=1
+  else
+    echo "✅ PASS: app_id=$test_app_id — thesis not null"
+  fi
+  
+  # Проверка thesis_archetype
+  ARCHETYPE="$(echo "$DETAIL_JSON" | jq -r '.thesis.thesis_archetype // empty')"
+  if [[ -z "$ARCHETYPE" ]]; then
+    echo "❌ FAIL: app_id=$test_app_id — thesis_archetype отсутствует"
+    fail=1
+  elif [[ "$ARCHETYPE" == "marketing_distress" ]]; then
+    echo "❌ FAIL: app_id=$test_app_id — thesis_archetype = marketing_distress (запрещено)"
+    fail=1
+  elif [[ ! " ${VALID_ARCHETYPES[@]} " =~ " ${ARCHETYPE} " ]]; then
+    echo "❌ FAIL: app_id=$test_app_id — thesis_archetype = $ARCHETYPE (недопустимое значение)"
+    fail=1
+  else
+    echo "✅ PASS: app_id=$test_app_id — thesis_archetype = $ARCHETYPE (допустимо)"
+  fi
+  
+  # Проверка приоритета архетипов
+  if [[ "$test_app_id" == "1410400" ]]; then
+    if [[ "$ARCHETYPE" != "late_pivot_after_release" ]]; then
+      echo "❌ FAIL: app_id=1410400 — ожидается late_pivot_after_release, получен $ARCHETYPE"
+      fail=1
+    else
+      echo "✅ PASS: app_id=1410400 — архетип late_pivot_after_release (правильный приоритет)"
+    fi
+  elif [[ "$test_app_id" == "999999" ]]; then
+    if [[ "$ARCHETYPE" != "early_publisher_search" ]]; then
+      echo "❌ FAIL: app_id=999999 — ожидается early_publisher_search, получен $ARCHETYPE"
+      fail=1
+    else
+      echo "✅ PASS: app_id=999999 — архетип early_publisher_search (правильный приоритет)"
+    fi
+  fi
+  
+  # Проверка publisher_interest
+  WHO_MIGHT_CARE_TYPE="$(echo "$DETAIL_JSON" | jq -r '.thesis.publisher_interest.who_might_care | type')"
+  NEXT_ACTIONS_TYPE="$(echo "$DETAIL_JSON" | jq -r '.thesis.publisher_interest.next_actions | type')"
+  
+  if [[ "$WHO_MIGHT_CARE_TYPE" != "array" ]]; then
+    echo "❌ FAIL: app_id=$test_app_id — publisher_interest.who_might_care не массив (type=$WHO_MIGHT_CARE_TYPE)"
+    fail=1
+  else
+    echo "✅ PASS: app_id=$test_app_id — publisher_interest.who_might_care is array"
+  fi
+  
+  if [[ "$NEXT_ACTIONS_TYPE" != "array" ]]; then
+    echo "❌ FAIL: app_id=$test_app_id — publisher_interest.next_actions не массив (type=$NEXT_ACTIONS_TYPE)"
+    fail=1
+  else
+    echo "✅ PASS: app_id=$test_app_id — publisher_interest.next_actions is array"
+  fi
+  
+  # E1/E2: Проверка publisher_status
+  PUB_STATUS="$(echo "$DETAIL_JSON" | jq -r '.publisher_status_code // .publisher_status // empty')"
+  if [[ -z "$PUB_STATUS" ]]; then
+    echo "❌ FAIL: app_id=$test_app_id — publisher_status отсутствует"
+    fail=1
+  elif [[ ! "$PUB_STATUS" =~ ^(has_publisher|self_published|unknown)$ ]]; then
+    echo "❌ FAIL: app_id=$test_app_id — publisher_status = $PUB_STATUS (недопустимое значение)"
+    fail=1
+  else
+    echo "✅ PASS: app_id=$test_app_id — publisher_status = $PUB_STATUS (допустимо)"
+  fi
+  
+  # E2: Если publisher_status == has_publisher → thesis НЕ содержит фразы «без издателя»
+  if [[ "$PUB_STATUS" == "has_publisher" ]]; then
+    THESIS_TEXT="$(echo "$DETAIL_JSON" | jq -r '.thesis.thesis // ""')"
+    if echo "$THESIS_TEXT" | grep -qi "без издателя"; then
+      echo "❌ FAIL: app_id=$test_app_id — publisher_status=has_publisher, но thesis содержит 'без издателя'"
+      fail=1
+    else
+      echo "✅ PASS: app_id=$test_app_id — publisher_status=has_publisher, thesis не содержит 'без издателя'"
+    fi
+  fi
+done
+echo
+
+# Задача 2: Проверка apps_with_signals >= 2
+echo "S7. Проверка apps_with_signals (сигнал-coverage)..."
+APPS_WITH_SIGNALS="$(psql_db "SELECT COUNT(DISTINCT app_id) FROM deal_intent_signal WHERE app_id IS NOT NULL;")"
+echo "  apps_with_signals: $APPS_WITH_SIGNALS"
+
+if [[ "$APPS_WITH_SIGNALS" -ge 2 ]]; then
+  echo "✅ PASS: apps_with_signals = $APPS_WITH_SIGNALS (>= 2)"
+else
+  echo "❌ FAIL: apps_with_signals = $APPS_WITH_SIGNALS (должно быть >= 2)"
+  fail=1
+fi
+echo
+
+# S8. Проверка Partner-mode формулировки для app_id=999999
+echo "S8. Проверка Partner-mode формулировки (app_id=999999)..."
+TEST_APP_ID=999999
+
+# 1) Upsert записи в steam_app_cache с publishers
+echo "  Создание/обновление steam_app_cache для app_id=$TEST_APP_ID..."
+# Используем array_to_json для избежания проблем с экранированием кавычек
+psql_db "UPDATE steam_app_cache SET publishers = array_to_json(ARRAY['Test Publisher'])::jsonb, updated_at = now() WHERE steam_app_id = $TEST_APP_ID;" > /dev/null 2>&1
+UPDATE_EXIT=$?
+if [[ $UPDATE_EXIT -eq 0 ]]; then
+  echo "  ✅ Запись в steam_app_cache обновлена"
+else
+  # Если UPDATE не сработал (записи нет), пробуем INSERT
+  psql_db "INSERT INTO steam_app_cache (steam_app_id, name, publishers, updated_at) VALUES ($TEST_APP_ID, 'SYNTHETIC TEST GAME', array_to_json(ARRAY['Test Publisher'])::jsonb, now()) ON CONFLICT (steam_app_id) DO UPDATE SET publishers = EXCLUDED.publishers, updated_at = now();" > /dev/null 2>&1
+  INSERT_EXIT=$?
+  if [[ $INSERT_EXIT -eq 0 ]]; then
+    echo "  ✅ Запись в steam_app_cache создана/обновлена (через INSERT)"
+  else
+    echo "  ⚠️  WARNING: не удалось обновить publishers, но продолжаем проверку"
+  fi
+fi
+
+# 2) Проверка detail endpoint
+sleep 1  # Даём время на обновление кэша
+DETAIL_JSON="$(fetch_list "$API_BASE/api/v1/deals/${TEST_APP_ID}/detail")"
+
+# Проверка publisher_status_code
+PUB_STATUS_CODE="$(echo "$DETAIL_JSON" | jq -r '.publisher_status_code // empty')"
+if [[ "$PUB_STATUS_CODE" == "has_publisher" ]]; then
+  echo "  ✅ PASS: publisher_status_code = has_publisher"
+else
+  echo "  ❌ FAIL: publisher_status_code = $PUB_STATUS_CODE (ожидается has_publisher)"
+  fail=1
+fi
+
+# Проверка thesis содержит "партнёра" и НЕ содержит "ищет издателя"
+THESIS_TEXT="$(echo "$DETAIL_JSON" | jq -r '.thesis.thesis // ""')"
+if echo "$THESIS_TEXT" | grep -qi "партнёра"; then
+  echo "  ✅ PASS: thesis содержит 'партнёра'"
+else
+  echo "  ❌ FAIL: thesis не содержит 'партнёра'"
+  echo "    thesis: $THESIS_TEXT"
+  fail=1
+fi
+
+if echo "$THESIS_TEXT" | grep -qi "ищет издателя"; then
+  echo "  ❌ FAIL: thesis содержит 'ищет издателя' (запрещено при has_publisher)"
+  echo "    thesis: $THESIS_TEXT"
+  fail=1
+else
+  echo "  ✅ PASS: thesis не содержит 'ищет издателя'"
+fi
+
+# Проверка risk_flags содержит фразу про "уже есть издатель"
+RISK_FLAGS_TYPE="$(echo "$DETAIL_JSON" | jq -r '.thesis.publisher_interest.risk_flags | type')"
+if [[ "$RISK_FLAGS_TYPE" != "array" ]]; then
+  echo "  ❌ FAIL: risk_flags не является массивом (type=$RISK_FLAGS_TYPE)"
+  fail=1
+else
+  RISK_FLAGS_TEXT="$(echo "$DETAIL_JSON" | jq -r '.thesis.publisher_interest.risk_flags | .[]' | tr '\n' ' ')"
+  if echo "$RISK_FLAGS_TEXT" | grep -qi "уже есть издатель"; then
+    echo "  ✅ PASS: risk_flags содержит фразу про 'уже есть издатель'"
+  else
+    echo "  ❌ FAIL: risk_flags не содержит фразу про 'уже есть издатель'"
+    echo "    risk_flags: $RISK_FLAGS_TEXT"
+    fail=1
+  fi
+fi
+echo
+
 if [[ "$fail" -eq 0 ]]; then
   echo "=== ✅ ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ ==="
   exit 0
