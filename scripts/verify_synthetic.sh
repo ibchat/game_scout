@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# curl с ретраями (защита от uvicorn reload / Empty reply)
+CURL(){ url="$1"; tries=8; delay=0.25; i=1; while [ $i -le $tries ]; do out=$(curl -4 -sS --max-time 5 "$url" 2>/dev/null) && { printf "%s" "$out"; return 0; }; sleep $delay; i=$((i+1)); done; curl -4 -sS --max-time 5 "$url"; }
+
 set -euo pipefail
 
 API_BASE="${API_BASE:-http://127.0.0.1:8000}"
@@ -283,6 +287,81 @@ else
     fail=1
   fi
 fi
+echo
+
+# S9. Проверка confidence (новая формула)
+echo "S9. Проверка confidence (новая формула)..."
+for test_app_id in 1410400 999999; do
+  echo "  Проверка app_id=$test_app_id..."
+  DETAIL_JSON="$(fetch_list "$API_BASE/api/v1/deals/${test_app_id}/detail")"
+  
+  CONFIDENCE="$(echo "$DETAIL_JSON" | jq -r '.thesis.confidence // empty')"
+  QUALITY_SCORE="$(echo "$DETAIL_JSON" | jq -r '.quality_score // 0')"
+  
+  if [[ -z "$CONFIDENCE" ]] || [[ "$CONFIDENCE" == "null" ]]; then
+    echo "  ❌ FAIL: app_id=$test_app_id — confidence отсутствует"
+    fail=1
+  else
+    # Проверка диапазона 0.0 <= confidence <= 1.0
+    CONFIDENCE_FLOAT=$(echo "$CONFIDENCE" | awk '{print $1+0}')
+    if (( $(echo "$CONFIDENCE_FLOAT < 0.0" | bc -l) )) || (( $(echo "$CONFIDENCE_FLOAT > 1.0" | bc -l) )); then
+      echo "  ❌ FAIL: app_id=$test_app_id — confidence = $CONFIDENCE (должно быть 0.0 <= confidence <= 1.0)"
+      fail=1
+    else
+      echo "  ✅ PASS: app_id=$test_app_id — confidence = $CONFIDENCE (в диапазоне)"
+      
+      # Дополнительно: если quality_score == 0 → confidence не может быть 1.0
+      QUALITY_FLOAT=$(echo "$QUALITY_SCORE" | awk '{print $1+0}')
+      if (( $(echo "$QUALITY_FLOAT == 0" | bc -l) )) && (( $(echo "$CONFIDENCE_FLOAT == 1.0" | bc -l) )); then
+        echo "  ❌ FAIL: app_id=$test_app_id — quality_score=0, но confidence=1.0 (ожидается штраф -0.2)"
+        fail=1
+      elif (( $(echo "$QUALITY_FLOAT == 0" | bc -l) )); then
+        echo "  ✅ PASS: app_id=$test_app_id — quality_score=0, confidence=$CONFIDENCE (не 1.0, штраф применён)"
+      fi
+    fi
+  fi
+done
+echo
+
+# S10. Проверка publisher-interest codes косвенно через RU label
+echo "S10. Проверка publisher-interest (RU labels для archetype)..."
+for test_app_id in 1410400 999999; do
+  echo "  Проверка app_id=$test_app_id..."
+  DETAIL_JSON="$(fetch_list "$API_BASE/api/v1/deals/${test_app_id}/detail")"
+  
+  ARCHETYPE="$(echo "$DETAIL_JSON" | jq -r '.thesis.thesis_archetype // empty')"
+  WHO_MIGHT_CARE_JSON="$(echo "$DETAIL_JSON" | jq -r '.thesis.publisher_interest.who_might_care // []')"
+  WHO_MIGHT_CARE_TYPE="$(echo "$DETAIL_JSON" | jq -r '.thesis.publisher_interest.who_might_care | type')"
+  
+  if [[ "$WHO_MIGHT_CARE_TYPE" != "array" ]]; then
+    echo "  ❌ FAIL: app_id=$test_app_id — who_might_care не является массивом (type=$WHO_MIGHT_CARE_TYPE)"
+    fail=1
+  else
+    WHO_MIGHT_CARE_TEXT="$(echo "$WHO_MIGHT_CARE_JSON" | jq -r '.[]' | tr '\n' '|')"
+    
+    # Проверка для 1410400 (late_pivot_after_release)
+    if [[ "$test_app_id" == "1410400" ]]; then
+      if echo "$WHO_MIGHT_CARE_TEXT" | grep -qE "(Паблишер \"спасатель\"|Паблишер-оператор|Маркетинговый издатель)"; then
+        echo "  ✅ PASS: app_id=$test_app_id — who_might_care содержит ожидаемый RU label для late_pivot_after_release"
+      else
+        echo "  ❌ FAIL: app_id=$test_app_id — who_might_care не содержит ожидаемых RU labels для late_pivot_after_release"
+        echo "    who_might_care: $WHO_MIGHT_CARE_TEXT"
+        fail=1
+      fi
+    fi
+    
+    # Проверка для 999999 (early_publisher_search)
+    if [[ "$test_app_id" == "999999" ]]; then
+      if echo "$WHO_MIGHT_CARE_TEXT" | grep -qE "(Скаут/фонд|Паблишер по жанру|Маркетинговый издатель)"; then
+        echo "  ✅ PASS: app_id=$test_app_id — who_might_care содержит ожидаемый RU label для early_publisher_search"
+      else
+        echo "  ❌ FAIL: app_id=$test_app_id — who_might_care не содержит ожидаемых RU labels для early_publisher_search"
+        echo "    who_might_care: $WHO_MIGHT_CARE_TEXT"
+        fail=1
+      fi
+    fi
+  fi
+done
 echo
 
 if [[ "$fail" -eq 0 ]]; then
