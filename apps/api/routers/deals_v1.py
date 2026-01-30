@@ -742,6 +742,9 @@ async def get_deals_list(
     Список игр с deal intent.
     """
     try:
+        # Explore Mode: при нулевых порогах отключаем строгие гейты
+        explore_mode = (min_intent_score == 0 and min_quality_score == 0)
+        logger.info(f"Deals list: explore_mode={explore_mode}, min_intent={min_intent_score}, min_quality={min_quality_score}")
         # Определяем реальное имя колонки app_id в steam_review_daily (один раз)
         app_id_col = detect_steam_review_app_id_column(db)
         logger.info(f"Using app_id column in steam_review_daily: {app_id_col}")
@@ -800,21 +803,35 @@ async def get_deals_list(
               AND d.stage IN ('coming_soon', 'demo', 'early_access', 'released')
         """)
         
-        # Подсчитываем total до фильтрации (с учетом фильтров по ТЗ)
+        # Подсчитываем total до фильтрации (в Explore Mode используем только базовую санитарию)
+        total_base_where = """
+            WHERE 1=1
+              -- Базовая санитария: название ОБЯЗАТЕЛЬНО
+              AND (c.name IS NOT NULL AND c.name != '' OR g.title IS NOT NULL AND g.title != '')
+        """
+        
+        total_strict_filters = ""
+        if not explore_mode:
+            total_strict_filters = """
+              -- Фильтр по ТЗ: release_date IS NULL → исключить
+              AND COALESCE(c.release_date, d.release_date) IS NOT NULL
+              -- Фильтр по ТЗ: release_date >= current_date - 4 years
+              AND COALESCE(c.release_date, d.release_date) >= CURRENT_DATE - INTERVAL '4 years'
+            """
+        
+        total_common = """
+              -- Фильтр по ТЗ: разрешённые стадии
+              AND d.stage IN ('coming_soon', 'demo', 'early_access', 'released')
+        """
+        
         total_query = text(f"""
             SELECT COUNT(*) as cnt
             FROM deal_intent_game d
             LEFT JOIN steam_app_cache c ON c.steam_app_id = d.app_id::bigint
             LEFT JOIN games g ON g.source = 'steam' AND g.source_id = d.app_id::text
-            WHERE 1=1
-              -- Фильтр по ТЗ: название ОБЯЗАТЕЛЬНО (steam_app_cache.name или games.title)
-              AND (c.name IS NOT NULL AND c.name != '' OR g.title IS NOT NULL AND g.title != '')
-              -- Фильтр по ТЗ: release_date IS NULL → исключить
-              AND COALESCE(c.release_date, d.release_date) IS NOT NULL
-              -- Фильтр по ТЗ: release_date >= current_date - 4 years
-              AND COALESCE(c.release_date, d.release_date) >= CURRENT_DATE - INTERVAL '4 years'
-              -- Фильтр по ТЗ: разрешённые стадии
-              AND d.stage IN ('coming_soon', 'demo', 'early_access', 'released')
+            {total_base_where}
+            {total_strict_filters}
+            {total_common}
             {f"AND d.stage = :stage" if stage else ""}
             {synthetic_filter}
         """)
@@ -856,41 +873,22 @@ async def get_deals_list(
                    excluded_no_name, excluded_no_release, excluded_old)
         
         # Применяем фильтры согласно ТЗ
-        # Источники истины: steam_app_cache.name → games.title → если нет → исключить
-        # Фильтр: release_date IS NULL → исключить, release_date >= current_date - 4 years
+        # Explore Mode: при нулевых порогах отключаем строгие гейты, оставляем только базовую санитарию
         # ВАЖНО: используем реальное имя колонки app_id_col (определено выше)
-        query = text(f"""
-            SELECT 
-                d.app_id,
-                COALESCE(NULLIF(c.name, ''), g.title) as title,
-                COALESCE(NULLIF(c.steam_url, ''), d.steam_url, 'https://store.steampowered.com/app/' || d.app_id::text || '/') as steam_url,
-                d.developer_name,
-                d.publisher_name,
-                c.publishers as publishers,
-                COALESCE(c.release_date, d.release_date) as release_date,
-                d.stage,
-                d.has_demo,
-                d.price_eur,
-                d.intent_score,
-                d.quality_score,
-                d.intent_reasons,
-                d.quality_reasons,
-                d.updated_at,
-                srd.recent_reviews_count_30d,
-                srd.all_positive_percent,
-                srd.all_reviews_count
-            FROM deal_intent_game d
-            LEFT JOIN steam_app_cache c ON c.steam_app_id = d.app_id::bigint
-            LEFT JOIN games g ON g.source = 'steam' AND g.source_id = d.app_id::text
-            LEFT JOIN steam_review_daily srd ON srd.{app_id_col} = d.app_id::bigint
-                AND srd.day = (
-                    SELECT MAX(day) FROM steam_review_daily WHERE {app_id_col} = d.app_id::bigint
-                )
+        
+        # Базовые фильтры (применяются всегда)
+        base_where = """
             WHERE d.intent_score >= :min_intent_score
               AND d.quality_score >= :min_quality_score
-              -- Gate v2.0: Валидность - название ОБЯЗАТЕЛЬНО
+              -- Базовая санитария: название ОБЯЗАТЕЛЬНО
               AND (c.name IS NOT NULL AND c.name != '' OR g.title IS NOT NULL AND g.title != '')
-              -- Gate v2.0: Валидность - release_date не NULL (или first_seen_at если есть)
+        """
+        
+        # Строгие гейты (отключаются в Explore Mode)
+        strict_gates = ""
+        if not explore_mode:
+            strict_gates = """
+              -- Gate v2.0: Валидность - release_date не NULL
               AND COALESCE(c.release_date, d.release_date) IS NOT NULL
               -- Gate v2.0: Новизна (одно из условий)
               AND (
@@ -918,11 +916,47 @@ async def get_deals_list(
                 OR
                 ((COALESCE(srd.all_positive_percent, 0) >= 90) AND (COALESCE(srd.all_reviews_count, 0) >= 1000))
               )
-              -- Фильтр по ТЗ: разрешённые стадии
-              AND d.stage IN ('coming_soon', 'demo', 'early_access', 'released')
               -- Data Quality Gate: intent_score > 0 OR quality_score > 0
               AND (d.intent_score > 0 OR d.quality_score > 0)
-              {f"AND d.stage = :stage" if stage else ""}
+            """
+        
+        # Общие фильтры (применяются всегда)
+        common_filters = """
+              -- Фильтр по ТЗ: разрешённые стадии
+              AND d.stage IN ('coming_soon', 'demo', 'early_access', 'released')
+        """
+        
+        query = text(f"""
+            SELECT 
+                d.app_id,
+                COALESCE(NULLIF(c.name, ''), g.title) as title,
+                COALESCE(NULLIF(c.steam_url, ''), d.steam_url, 'https://store.steampowered.com/app/' || d.app_id::text || '/') as steam_url,
+                d.developer_name,
+                d.publisher_name,
+                c.publishers as publishers,
+                COALESCE(c.release_date, d.release_date) as release_date,
+                d.stage,
+                d.has_demo,
+                d.price_eur,
+                d.intent_score,
+                d.quality_score,
+                d.intent_reasons,
+                d.quality_reasons,
+                d.updated_at,
+                srd.recent_reviews_count_30d,
+                srd.all_positive_percent,
+                srd.all_reviews_count
+            FROM deal_intent_game d
+            LEFT JOIN steam_app_cache c ON c.steam_app_id = d.app_id::bigint
+            LEFT JOIN games g ON g.source = 'steam' AND g.source_id = d.app_id::text
+            LEFT JOIN steam_review_daily srd ON srd.{app_id_col} = d.app_id::bigint
+                AND srd.day = (
+                    SELECT MAX(day) FROM steam_review_daily WHERE {app_id_col} = d.app_id::bigint
+                )
+            {base_where}
+            {strict_gates}
+            {common_filters}
+            {f"AND d.stage = :stage" if stage else ""}
             {synthetic_filter}
             ORDER BY d.intent_score DESC, d.quality_score DESC
             LIMIT :limit
@@ -937,6 +971,8 @@ async def get_deals_list(
             params["stage"] = stage
         
         rows = db.execute(query, params).mappings().all()
+        sql_rows = len(rows)
+        logger.info(f"Deals list: sql_rows={sql_rows} (after SQL filters, explore_mode={explore_mode})")
         
         # Получаем все сигналы для игр одним запросом (v3: для Intent Freshness Gate)
         app_ids = [row["app_id"] for row in rows]
@@ -967,55 +1003,82 @@ async def get_deals_list(
         excluded_count = 0
         excluded_reasons = {}
         
+        # Диагностика: счетчики для каждого типа фильтра
+        diagnostic = {
+            "sql_rows": sql_rows,
+            "after_python_filters": 0,
+            "excluded_reasons": {}
+        }
+        
         for row in rows:
             title = row.get("title")
             release_date = row.get("release_date")
             
-            # Проверка по ТЗ: название ОБЯЗАТЕЛЬНО
+            # Базовая санитария: название ОБЯЗАТЕЛЬНО (применяется всегда)
             if not title or title.strip() == "":
                 excluded_count += 1
                 excluded_reasons["no_name"] = excluded_reasons.get("no_name", 0) + 1
+                diagnostic["excluded_reasons"]["no_name"] = diagnostic["excluded_reasons"].get("no_name", 0) + 1
                 logger.warning(f"Excluded app_id {row['app_id']}: no name (steam_app_cache.name and games.name both empty)")
                 continue
             
-            # Проверка по ТЗ: release_date ОБЯЗАТЕЛЬНО
-            if not release_date:
-                excluded_count += 1
-                excluded_reasons["no_release_date"] = excluded_reasons.get("no_release_date", 0) + 1
-                logger.warning(f"Excluded app_id {row['app_id']}: release_date IS NULL")
-                continue
-            
-            # Проверка по ТЗ: release_date >= current_date - 4 years
-            try:
-                if isinstance(release_date, str):
-                    release_date_obj = datetime.fromisoformat(release_date.replace('Z', '+00:00')).date()
-                elif hasattr(release_date, 'date'):
-                    release_date_obj = release_date.date() if hasattr(release_date, 'date') else release_date
-                else:
-                    release_date_obj = release_date
-                
-                four_years_ago = date.today() - timedelta(days=365 * 4)
-                if release_date_obj < four_years_ago:
+            # Проверка release_date (отключается в Explore Mode)
+            release_date_obj = None
+            if not explore_mode:
+                # Проверка по ТЗ: release_date ОБЯЗАТЕЛЬНО
+                if not release_date:
                     excluded_count += 1
-                    excluded_reasons["too_old"] = excluded_reasons.get("too_old", 0) + 1
-                    logger.warning(f"Excluded app_id {row['app_id']}: release_date {release_date_obj} is older than 4 years")
+                    excluded_reasons["no_release_date"] = excluded_reasons.get("no_release_date", 0) + 1
+                    diagnostic["excluded_reasons"]["no_release_date"] = diagnostic["excluded_reasons"].get("no_release_date", 0) + 1
+                    logger.warning(f"Excluded app_id {row['app_id']}: release_date IS NULL")
                     continue
-            except Exception as e:
-                logger.error(f"Failed to parse release_date for app_id {row['app_id']}: {e}")
-                excluded_count += 1
-                excluded_reasons["invalid_release_date"] = excluded_reasons.get("invalid_release_date", 0) + 1
-                continue
+                
+                # Проверка по ТЗ: release_date >= current_date - 4 years
+                try:
+                    if isinstance(release_date, str):
+                        release_date_obj = datetime.fromisoformat(release_date.replace('Z', '+00:00')).date()
+                    elif hasattr(release_date, 'date'):
+                        release_date_obj = release_date.date() if hasattr(release_date, 'date') else release_date
+                    else:
+                        release_date_obj = release_date
+                    
+                    four_years_ago = date.today() - timedelta(days=365 * 4)
+                    if release_date_obj < four_years_ago:
+                        excluded_count += 1
+                        excluded_reasons["too_old"] = excluded_reasons.get("too_old", 0) + 1
+                        diagnostic["excluded_reasons"]["too_old"] = diagnostic["excluded_reasons"].get("too_old", 0) + 1
+                        logger.warning(f"Excluded app_id {row['app_id']}: release_date {release_date_obj} is older than 4 years")
+                        continue
+                except Exception as e:
+                    logger.error(f"Failed to parse release_date for app_id {row['app_id']}: {e}")
+                    excluded_count += 1
+                    excluded_reasons["invalid_release_date"] = excluded_reasons.get("invalid_release_date", 0) + 1
+                    diagnostic["excluded_reasons"]["invalid_release_date"] = diagnostic["excluded_reasons"].get("invalid_release_date", 0) + 1
+                    continue
+            else:
+                # В Explore Mode парсим release_date без строгих проверок
+                try:
+                    if release_date:
+                        if isinstance(release_date, str):
+                            release_date_obj = datetime.fromisoformat(release_date.replace('Z', '+00:00')).date()
+                        elif hasattr(release_date, 'date'):
+                            release_date_obj = release_date.date() if hasattr(release_date, 'date') else release_date
+                        else:
+                            release_date_obj = release_date
+                except:
+                    release_date_obj = None
             
-            # Data Quality Gate: intent_score > 0 OR quality_score > 0 (иначе не имеет смысла)
+            # Data Quality Gate: intent_score > 0 OR quality_score > 0 (отключается в Explore Mode)
             intent_score = row.get("intent_score") or 0
             quality_score = row.get("quality_score") or 0
-            if intent_score <= 0 and quality_score <= 0:
+            if not explore_mode and intent_score <= 0 and quality_score <= 0:
                 excluded_count += 1
                 excluded_reasons["zero_scores"] = excluded_reasons.get("zero_scores", 0) + 1
+                diagnostic["excluded_reasons"]["zero_scores"] = diagnostic["excluded_reasons"].get("zero_scores", 0) + 1
                 logger.debug(f"Excluded app_id {row['app_id']}: both intent_score and quality_score are 0")
                 continue
             
-            # v3.1: Intent Freshness Gate - проверяем свежесть намерения
+            # v3.1: Intent Freshness Gate - проверяем свежесть намерения (отключается в Explore Mode)
             app_id = row["app_id"]
             signals = signals_by_app.get(app_id, [])
             
@@ -1035,13 +1098,18 @@ async def get_deals_list(
                 "created_at": None  # TODO: получить из trends_seed_apps если есть
             }
             
-            # Проверяем Intent Freshness Gate
-            freshness_gate = check_intent_freshness_gate(app_data, signals)
-            if not freshness_gate.get("passes", False):
-                excluded_count += 1
-                excluded_reasons["no_freshness"] = excluded_reasons.get("no_freshness", 0) + 1
-                logger.debug(f"Excluded app_id {app_id}: Intent Freshness Gate failed - {freshness_gate.get('reason', 'unknown')}")
-                continue
+            # Проверяем Intent Freshness Gate (отключается в Explore Mode)
+            if not explore_mode:
+                freshness_gate = check_intent_freshness_gate(app_data, signals)
+                if not freshness_gate.get("passes", False):
+                    excluded_count += 1
+                    excluded_reasons["no_freshness"] = excluded_reasons.get("no_freshness", 0) + 1
+                    diagnostic["excluded_reasons"]["no_freshness"] = diagnostic["excluded_reasons"].get("no_freshness", 0) + 1
+                    logger.debug(f"Excluded app_id {app_id}: Intent Freshness Gate failed - {freshness_gate.get('reason', 'unknown')}")
+                    continue
+            else:
+                # В Explore Mode создаем фиктивный freshness_gate для совместимости
+                freshness_gate = {"passes": True, "reason": "explore_mode"}
             
             # Проверяем Success Penalty Gate
             success_penalty = check_success_penalty_gate(app_data, intent_score)
@@ -1111,10 +1179,13 @@ async def get_deals_list(
                 "verdict_label_ru": verdict.get("verdict_label_ru")
             })
         
+        diagnostic["after_python_filters"] = len(games)
+        
         if excluded_count > 0:
             logger.info(f"Deals list: excluded {excluded_count} games. Reasons: {excluded_reasons}")
         
-        logger.info(f"Deals list: returning {len(games)} games (excluded {excluded_count})")
+        logger.info(f"Deals list: returning {len(games)} games (excluded {excluded_count}, explore_mode={explore_mode})")
+        logger.info(f"Deals list diagnostic: {diagnostic}")
         
         # Подсчитываем статистику по названиям
         missing_names = sum(1 for g in games if g.get("title", "").startswith("App "))
@@ -1134,7 +1205,9 @@ async def get_deals_list(
             },
             "debug": {
                 "excluded_in_postprocessing": excluded_count,
-                "excluded_reasons": excluded_reasons
+                "excluded_reasons": excluded_reasons,
+                "diagnostic": diagnostic,
+                "explore_mode": explore_mode
             }
         }
         
@@ -2497,20 +2570,22 @@ async def import_discord_signal(
 
 @router.post("/signals/collect_reddit")
 async def collect_reddit_signals(
-    days: int = Query(14, ge=1, le=30, description="Количество дней назад для поиска постов"),
+    days: int = Query(90, ge=1, le=180, description="Количество дней назад для поиска постов (Vector A EXEC v1: минимум 90, лучше 180)"),
+    limit_per_sub: int = Query(500, ge=1, le=1000, description="Максимум постов на сабреддит (Vector A EXEC v1: минимум 500, лучше 1000)"),
+    include_comments: bool = Query(False, description="Собирать комментарии из постов (Vector A A2)"),
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
     """
-    Запустить сбор Deal Intent Signals из Reddit.
-    MVP: собирает посты из сабреддитов, матчит keywords, извлекает Steam app_id.
+    Запустить сбор Deal Intent Signals из Reddit (Vector A EXEC v1).
+    Согласно TZ_SIGNAL_INGESTION_VECTOR_A_EXEC_V1.md.
     """
     try:
         from apps.worker.tasks.collect_deal_intent_signals_reddit import collect_deal_intent_signals_reddit_task
         
-        logger.info(f"Starting Reddit Deal Intent Signals collection, days={days}")
+        logger.info(f"Starting Reddit Deal Intent Signals collection (Vector A EXEC v1), days={days}, limit_per_sub={limit_per_sub}, include_comments={include_comments}")
         
         # Запускаем task синхронно (выполняется в API контейнере)
-        result = collect_deal_intent_signals_reddit_task(days=days, limit_per_sub=25)
+        result = collect_deal_intent_signals_reddit_task(days=days, limit_per_sub=limit_per_sub, include_comments=include_comments)
         
         return {
             "status": "ok",
@@ -2522,22 +2597,53 @@ async def collect_reddit_signals(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/signals/collect_youtube")
-async def collect_youtube_signals(
-    days: int = Query(30, ge=1, le=90, description="Количество дней назад для поиска видео"),
+@router.post("/signals/collect_steam_reviews")
+async def collect_steam_reviews_signals(
+    days: int = Query(180, ge=1, le=365, description="Количество дней назад для анализа review velocity (Vector A EXEC v1 A3: минимум 180)"),
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
     """
-    Запустить сбор Deal Intent Signals из существующих YouTube данных.
-    Использует ExternalVideo и ExternalCommentSample для матчинга keywords.
+    Запустить сбор Deal Intent Signals из Steam Reviews (Vector A EXEC v1 A3).
+    Согласно TZ_SIGNAL_INGESTION_VECTOR_A_EXEC_V1.md п.3.A3.
+    """
+    try:
+        from apps.worker.tasks.collect_deal_intent_signals_steam_reviews import collect_deal_intent_signals_steam_reviews_task
+        
+        logger.info(f"Starting Steam Reviews Deal Intent Signals collection (Vector A EXEC v1 A3), days={days}")
+        
+        # Запускаем task синхронно (выполняется в API контейнере)
+        result = collect_deal_intent_signals_steam_reviews_task(days=days)
+        
+        return {
+            "status": "ok",
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to collect Steam Reviews signals: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/signals/collect_youtube")
+async def collect_youtube_signals(
+    days: int = Query(365, ge=1, le=365, description="Количество дней назад для поиска видео (Vector B: используем все данные)"),
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """
+    Запустить сбор Deal Intent Signals из существующих YouTube данных (Vector B EXEC v1).
+    Анализирует ExternalVideo (title) и ExternalCommentSample (comments).
+    Согласно TZ_SIGNAL_INGESTION_VECTOR_B_EXEC_V1.md.
     """
     try:
         from apps.worker.tasks.collect_deal_intent_signals_youtube import collect_deal_intent_signals_youtube_task
         
-        logger.info(f"Starting YouTube Deal Intent Signals collection, days={days}")
+        logger.info(f"Starting YouTube Deal Intent Signals collection (Vector B), days={days}")
         
         # Запускаем task синхронно (выполняется в API контейнере)
         result = collect_deal_intent_signals_youtube_task(days=days)
+        
+        if not result:
+            result = {"status": "error", "error": "Task returned None"}
         
         return {
             "status": "ok",
