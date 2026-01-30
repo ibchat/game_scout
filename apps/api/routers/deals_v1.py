@@ -38,12 +38,12 @@ PUBLISHER_TYPE_INFLUENCER_PARTNER = "influencer_partner"
 
 # Маппинг code → RU label (для API остаётся русский)
 PUBLISHER_TYPE_LABEL_RU = {
-    PUBLISHER_TYPE_SCOUT_FUND: "Скаут/фонд (ранние стадии, портфель)",
-    PUBLISHER_TYPE_GENRE_PUBLISHER: "Паблишер по жанру/нишевый куратор",
+    PUBLISHER_TYPE_SCOUT_FUND: "Скаут/фонд",
+    PUBLISHER_TYPE_GENRE_PUBLISHER: "Паблишер по жанру",
     PUBLISHER_TYPE_MARKETING_PUBLISHER: "Маркетинговый издатель (performance / UA)",
     PUBLISHER_TYPE_TURNAROUND_PUBLISHER: "Паблишер \"спасатель\" (late-stage turnaround)",
     PUBLISHER_TYPE_OPERATOR_PUBLISHER: "Паблишер-оператор (live ops / контент)",
-    PUBLISHER_TYPE_INFLUENCER_PARTNER: "Инфлюенсер/медиа-партнёр (аудитория/контент)"
+    PUBLISHER_TYPE_INFLUENCER_PARTNER: "Инфлюенсер/партнёр (дистрибуция)"
 }
 
 
@@ -254,11 +254,145 @@ def build_publisher_interest(
         risk_flags = []
         next_actions = []
     
+    # Формируем who_might_care_codes для фильтрации (Vector #3)
+    who_might_care_codes = []
+    if archetype == "early_publisher_search":
+        who_might_care_codes = [
+            PUBLISHER_TYPE_SCOUT_FUND,
+            PUBLISHER_TYPE_GENRE_PUBLISHER,
+            PUBLISHER_TYPE_MARKETING_PUBLISHER
+        ]
+    elif archetype == "late_pivot_after_release":
+        who_might_care_codes = [
+            PUBLISHER_TYPE_TURNAROUND_PUBLISHER,
+            PUBLISHER_TYPE_MARKETING_PUBLISHER,
+            PUBLISHER_TYPE_OPERATOR_PUBLISHER
+        ]
+    elif archetype == "weak_signal_exploration":
+        who_might_care_codes = [
+            PUBLISHER_TYPE_SCOUT_FUND,
+            PUBLISHER_TYPE_GENRE_PUBLISHER
+        ]
+    elif archetype == "opportunistic_outreach":
+        who_might_care_codes = [
+            PUBLISHER_TYPE_INFLUENCER_PARTNER,
+            PUBLISHER_TYPE_MARKETING_PUBLISHER
+        ]
+    elif archetype == "unclear_intent":
+        if intent_score > 0:
+            who_might_care_codes = [PUBLISHER_TYPE_SCOUT_FUND]
+    elif archetype == "high_intent_low_quality":
+        who_might_care_codes = [
+            PUBLISHER_TYPE_MARKETING_PUBLISHER,
+            PUBLISHER_TYPE_INFLUENCER_PARTNER
+        ]
+    
     return {
         "who_might_care": who_might_care,
+        "who_might_care_codes": who_might_care_codes,  # Vector #3
         "why_now": why_now,
         "risk_flags": risk_flags,
         "next_actions": next_actions
+    }
+
+
+def build_thesis_explain(
+    thesis_data: Dict[str, Any],
+    publisher_interest: Dict[str, Any],
+    publisher_status_code: str,
+    signals: List[Dict[str, Any]],
+    app_data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Формирует thesis_explain — структурированный блок объяснения для UI.
+    Vector #1: Explainability UI.
+    """
+    # headline = thesis.thesis
+    headline = thesis_data.get("thesis", "Недостаточно данных")
+    
+    # why = комбинация supporting_facts + 1 фраза из publisher_interest.why_now (не более 6)
+    why = []
+    supporting_facts = thesis_data.get("supporting_facts", [])
+    why.extend(supporting_facts[:5])  # Максимум 5 из supporting_facts
+    
+    why_now_list = publisher_interest.get("why_now", [])
+    if why_now_list and len(why) < 6:
+        why.append(why_now_list[0])  # Первая фраза из why_now
+    
+    # signals = последние 1–3 сигнала (по свежести, days_ago asc)
+    signals_list = []
+    # Вычисляем days_ago для каждого сигнала
+    signals_with_days = []
+    for sig in signals:
+        published_at = sig.get("published_at") or sig.get("created_at")
+        if published_at:
+            if isinstance(published_at, datetime):
+                delta = (datetime.now(published_at.tzinfo) if published_at.tzinfo else datetime.utcnow()) - published_at
+            elif isinstance(published_at, str):
+                try:
+                    pub_dt = datetime.fromisoformat(published_at.replace('Z', '+00:00'))
+                    delta = datetime.now(pub_dt.tzinfo) - pub_dt if pub_dt.tzinfo else datetime.utcnow() - pub_dt
+                except:
+                    delta = None
+            else:
+                delta = None
+            
+            days_ago = int(delta.total_seconds() / 86400) if delta else None
+        else:
+            days_ago = None
+        
+        signals_with_days.append((sig, days_ago))
+    
+    # Сортируем по days_ago (asc, свежие первыми), затем берем первые 3
+    sorted_signals = sorted(
+        signals_with_days,
+        key=lambda x: (x[1] if x[1] is not None else 999999, x[0].get("published_at") or x[0].get("created_at") or datetime.min)
+    )[:3]
+    
+    for sig, days_ago in sorted_signals:
+        signal_text = sig.get("text", "") or ""
+        # Очищаем от [SYNTHETIC] и обрезаем до 140 символов
+        snippet = signal_text.replace("[SYNTHETIC]", "").strip()
+        if len(snippet) > 140:
+            snippet = snippet[:137] + "..."
+        
+        signals_list.append({
+            "source": sig.get("source", "unknown"),
+            "type": sig.get("signal_type", "unknown"),
+            "days_ago": days_ago,
+            "snippet": snippet
+        })
+    
+    # publisher_context
+    publisher_context = {
+        "publisher_status_code": publisher_status_code,
+        "publisher_status_ru": map_publisher_status_label(publisher_status_code),
+        "note": ""
+    }
+    if publisher_status_code == "has_publisher":
+        publisher_context["note"] = "У игры уже есть издатель: запрос может означать co-publishing, маркетинг или спасение релиза."
+    elif publisher_status_code == "self_published":
+        publisher_context["note"] = "Издателя на Steam нет: запрос трактуем как классический поиск издателя."
+    else:  # unknown
+        publisher_context["note"] = "По Steam нет надёжного сигнала об издателе: трактуем осторожно."
+    
+    # confidence_breakdown (из внутреннего поля)
+    confidence_breakdown = thesis_data.get("_confidence_breakdown", [])
+    
+    # next_step зависит от temporal_context
+    temporal_context = thesis_data.get("temporal_context", "unknown")
+    if temporal_context == "recent_interest":
+        next_step = "Контактировать сейчас, пока сигнал свежий. Запросить питчдек и демо."
+    else:
+        next_step = "Собрать больше подтверждений (вишлисты/конверсии/демо), затем контакт."
+    
+    return {
+        "headline": headline,
+        "why": why,
+        "signals": signals_list,
+        "publisher_context": publisher_context,
+        "confidence_breakdown": confidence_breakdown,
+        "next_step": next_step
     }
 
 
@@ -397,6 +531,9 @@ def build_deal_thesis(
         counter_facts.append("Применён success penalty (игра уже успешна)")
     
     # Вычисляем confidence по детерминированной формуле из TZ_BRAIN_EVOLUTION.md (п.7.1)
+    # Vector #1: Сохраняем breakdown для thesis_explain
+    confidence_breakdown = []
+    
     confidence = 0.0  # Начальное значение base
     
     # Определяем latest_days для behavioral_intent
@@ -406,26 +543,52 @@ def build_deal_thesis(
         latest_days = min(s["days_ago"] for s in valid_signals)
     
     # 1. +0.3 если есть свежие behavioral_intent и latest_days <= FRESH_DAYS
-    if latest_days is not None and latest_days <= FRESH_DAYS:
+    fresh_behavioral_applied = latest_days is not None and latest_days <= FRESH_DAYS
+    if fresh_behavioral_applied:
         confidence += 0.3
+    confidence_breakdown.append({
+        "rule": "+0.3 свежий behavioral_intent ≤ 60 дней",
+        "applied": fresh_behavioral_applied,
+        "delta": 0.3 if fresh_behavioral_applied else 0.0
+    })
     
-    # 2. +0.2 если stage согласуется с архетипом
-    # (thesis_archetype определится позже, но мы можем проверить stage сейчас)
-    # Для early_publisher_search: stage in (demo, coming_soon)
-    # Для late_pivot_after_release: stage == released
-    # Проверку делаем после определения архетипа, поэтому временно пропускаем
+    # 2. +0.2 если stage согласуется с архетипом (проверим после определения архетипа)
+    # Временно добавляем placeholder
+    confidence_breakdown.append({
+        "rule": "+0.2 stage согласуется с archetype",
+        "applied": False,  # Обновим после определения архетипа
+        "delta": 0.0
+    })
     
     # 3. +0.1 если intent_score > 0
-    if intent_score > 0:
+    intent_positive_applied = intent_score > 0
+    if intent_positive_applied:
         confidence += 0.1
+    confidence_breakdown.append({
+        "rule": "+0.1 intent_score > 0",
+        "applied": intent_positive_applied,
+        "delta": 0.1 if intent_positive_applied else 0.0
+    })
     
     # 4. -0.2 если quality_score == 0
-    if quality_score == 0:
+    quality_zero_applied = quality_score == 0
+    if quality_zero_applied:
         confidence -= 0.2
+    confidence_breakdown.append({
+        "rule": "-0.2 quality_score == 0",
+        "applied": quality_zero_applied,
+        "delta": -0.2 if quality_zero_applied else 0.0
+    })
     
     # 5. -0.2 если сигналы старше WEAK_DAYS
-    if latest_days is not None and latest_days > WEAK_DAYS:
+    stale_signals_applied = latest_days is not None and latest_days > WEAK_DAYS
+    if stale_signals_applied:
         confidence -= 0.2
+    confidence_breakdown.append({
+        "rule": "-0.2 latest_days > 90",
+        "applied": stale_signals_applied,
+        "delta": -0.2 if stale_signals_applied else 0.0
+    })
     
     # Определяем thesis_archetype на основе имеющихся данных (жёсткий приоритет правил)
     thesis_archetype = None  # Сначала не определён
@@ -476,10 +639,20 @@ def build_deal_thesis(
             thesis_archetype = "high_intent_low_quality"
     
     # 2. +0.2 если stage согласуется с архетипом (продолжение формулы confidence)
+    stage_match_applied = False
     if thesis_archetype == "early_publisher_search" and stage in ["demo", "coming_soon"]:
         confidence += 0.2
+        stage_match_applied = True
     elif thesis_archetype == "late_pivot_after_release" and stage == "released":
         confidence += 0.2
+        stage_match_applied = True
+    
+    # Обновляем breakdown для stage match
+    confidence_breakdown[1] = {
+        "rule": "+0.2 stage согласуется с archetype",
+        "applied": stage_match_applied,
+        "delta": 0.2 if stage_match_applied else 0.0
+    }
     
     # Финал: clamp(base, 0.0, 1.0)
     confidence = max(0.0, min(1.0, confidence))
@@ -499,7 +672,8 @@ def build_deal_thesis(
         "temporal_context": temporal_context,
         "confidence": round(confidence, 2),
         "thesis_archetype": thesis_archetype,
-        "publisher_interest": publisher_interest
+        "publisher_interest": publisher_interest,
+        "_confidence_breakdown": confidence_breakdown  # Внутреннее поле для build_thesis_explain
     }
 
 router = APIRouter(prefix="/deals", tags=["Deals / Publisher Intent"])
@@ -966,6 +1140,199 @@ async def get_deals_list(
         
     except Exception as e:
         logger.error(f"Failed to get deals list: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/shortlist")
+async def get_deals_shortlist(
+    limit: int = Query(30, ge=1, le=200, description="Maximum number of items to return"),
+    min_confidence: float = Query(0.4, ge=0.0, le=1.0, description="Minimum confidence threshold"),
+    archetypes: Optional[str] = Query(None, description="Comma-separated list of archetypes to filter"),
+    publisher_status: Optional[str] = Query(None, description="Filter by publisher status: has_publisher|self_published|unknown"),
+    temporal_context: Optional[str] = Query(None, description="Filter by temporal context: recent_interest|stale_interest|unknown"),
+    publisher_types: Optional[str] = Query(None, description="Comma-separated list of publisher types (Vector #3)"),
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """
+    Auto-Shortlist endpoint (Vector #2).
+    Возвращает список игр с высоким confidence, отфильтрованный по параметрам.
+    """
+    try:
+        # Определяем реальное имя колонки app_id в steam_review_daily
+        app_id_col = detect_steam_review_app_id_column(db)
+        
+        # Базовый запрос для получения всех кандидатов из deal_intent_game
+        base_query = text(f"""
+            SELECT DISTINCT
+                d.app_id,
+                COALESCE(NULLIF(c.name, ''), g.title) as title,
+                COALESCE(NULLIF(c.steam_url, ''), d.steam_url, 'https://store.steampowered.com/app/' || d.app_id::text || '/') as steam_url,
+                d.stage,
+                c.publishers as publishers,
+                d.intent_score,
+                d.quality_score,
+                COALESCE(d.updated_at, NOW()) as updated_at
+            FROM deal_intent_game d
+            LEFT JOIN steam_app_cache c ON c.steam_app_id = d.app_id::bigint
+            LEFT JOIN games g ON g.source = 'steam' AND g.source_id = d.app_id::text
+            WHERE d.app_id IS NOT NULL
+        """)
+        
+        rows = db.execute(base_query).mappings().all()
+        
+        items = []
+        for row in rows:
+            app_id = row["app_id"]
+            
+            # Получаем сигналы для этого app_id
+            signals_query = text("""
+                SELECT id, source, url, text, signal_type, confidence, published_at, created_at
+                FROM deal_intent_signal
+                WHERE app_id = :app_id
+                ORDER BY COALESCE(published_at, created_at) DESC
+                LIMIT 10
+            """)
+            signals_rows = db.execute(signals_query, {"app_id": app_id}).mappings().all()
+            signals = []
+            for s in signals_rows:
+                signals.append({
+                    "source": s["source"],
+                    "url": s["url"],
+                    "text": s["text"],
+                    "signal_type": s["signal_type"],
+                    "confidence": float(s["confidence"]) if s["confidence"] else 0.0,
+                    "published_at": s["published_at"],
+                    "created_at": s["created_at"]
+                })
+            
+            # Подготавливаем app_data
+            publishers_raw = row.get("publishers")
+            publisher_status_code = compute_publisher_status(publishers_raw)
+            
+            release_date = row.get("release_date")
+            release_date_obj = None
+            if release_date:
+                try:
+                    if isinstance(release_date, str):
+                        release_date_obj = datetime.fromisoformat(release_date.replace('Z', '+00:00')).date()
+                    elif hasattr(release_date, 'date'):
+                        release_date_obj = release_date.date()
+                    else:
+                        release_date_obj = release_date
+                except Exception:
+                    pass
+            
+            app_data = {
+                "app_id": app_id,
+                "publisher_status": publisher_status_code,
+                "stage": row.get("stage"),
+                "release_date": release_date_obj,
+                "has_demo": row.get("has_demo", False),
+                "price_eur": float(row["price_eur"]) if row.get("price_eur") else None,
+                "all_reviews_count": row.get("all_reviews_count", 0),
+                "recent_reviews_count_30d": row.get("recent_reviews_count_30d", 0),
+                "all_positive_percent": row.get("all_positive_percent", 0),
+            }
+            
+            # Выполняем анализ для получения gates
+            analysis = analyze_deal_intent(app_data, signals)
+            freshness_gate = analysis.get("freshness_gate", {})
+            success_penalty = analysis.get("success_penalty", {})
+            
+            intent_score_final = analysis.get("final_intent_score", row.get("intent_score", 0))
+            quality_score = row.get("quality_score", 0)
+            behavioral_intent_score = analysis.get("behavioral_intent_score", 0)
+            
+            # Строим thesis
+            thesis_data = build_deal_thesis(
+                app_data=app_data,
+                signals=signals,
+                scores={"intent_score": intent_score_final, "quality_score": quality_score},
+                gates={"freshness_gate": freshness_gate, "success_penalty": success_penalty}
+            )
+            
+            confidence = thesis_data.get("confidence", 0.0)
+            thesis_archetype = thesis_data.get("thesis_archetype", "unclear_intent")
+            temporal_context_val = thesis_data.get("temporal_context", "unknown")
+            publisher_interest = thesis_data.get("publisher_interest", {})
+            who_might_care_codes = publisher_interest.get("who_might_care_codes", [])
+            
+            # Фильтры
+            if confidence < min_confidence:
+                continue
+            
+            if archetypes:
+                archetype_list = [a.strip() for a in archetypes.split(",")]
+                if thesis_archetype not in archetype_list:
+                    continue
+            
+            if publisher_status and publisher_status_code != publisher_status:
+                continue
+            
+            if temporal_context and temporal_context_val != temporal_context:
+                continue
+            
+            # Vector #3: Фильтр по publisher_types
+            if publisher_types:
+                publisher_types_list = [pt.strip() for pt in publisher_types.split(",")]
+                if not set(who_might_care_codes) & set(publisher_types_list):
+                    continue
+            
+            # Вычисляем verdict
+            verdict_result = calculate_verdict(
+                intent_score=intent_score_final,
+                behavioral_intent_score=behavioral_intent_score,
+                freshness_gate=freshness_gate,
+                success_penalty=success_penalty
+            )
+            
+            # Формируем item (по ТЗ: БЕЗ headline и why_now)
+            publisher_status_label = map_publisher_status_label(publisher_status_code)
+            updated_at = row.get("updated_at")
+            updated_at_iso = updated_at.isoformat() if updated_at and hasattr(updated_at, 'isoformat') else (str(updated_at) if updated_at else None)
+            
+            items.append({
+                "app_id": app_id,
+                "title": row.get("title") or f"App {app_id}",
+                "steam_url": row.get("steam_url") or f"https://store.steampowered.com/app/{app_id}/",
+                "stage": row.get("stage", "unknown"),
+                "publisher_status_code": publisher_status_code,
+                "publisher_status": publisher_status_label,
+                "temporal_context": temporal_context_val,
+                "confidence": confidence,
+                "thesis_archetype": thesis_archetype,
+                "publisher_types": who_might_care_codes,  # Vector #3
+                "publisher_types_ru": publisher_interest.get("who_might_care", []),  # Vector #3
+                "intent_score": intent_score_final,
+                "quality_score": quality_score,
+                "verdict": verdict_result.get("verdict_code", "unknown"),
+                "verdict_label_ru": verdict_result.get("verdict_label_ru", "Неизвестно"),
+                "updated_at": updated_at_iso,
+                "_intent_score_final": intent_score_final  # Для сортировки
+            })
+        
+        # Сортировка: 1) confidence desc, 2) temporal_context recent_interest выше, 3) intent_score desc
+        items.sort(key=lambda x: (
+            -x["confidence"],
+            0 if x["temporal_context"] == "recent_interest" else 1,
+            -x["_intent_score_final"]
+        ))
+        
+        # Удаляем служебные поля перед возвратом
+        for item in items:
+            item.pop("_intent_score_final", None)
+        
+        # Применяем limit
+        items = items[:limit]
+        
+        return {
+            "status": "ok",
+            "count": len(items),
+            "items": items
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get deals shortlist: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1520,6 +1887,14 @@ async def get_deal_detail(
                         "matched_keywords": list(detected.keys())
                     })
         
+        # Формируем thesis_data (Vector #1)
+        thesis_data = build_deal_thesis(
+            app_data=app_data,
+            signals=signals,
+            scores={"intent_score": intent_score_final, "quality_score": quality_score},
+            gates={"freshness_gate": freshness_gate, "success_penalty": success_penalty}
+        )
+        
         # Формируем итоговый ответ
         return {
             "app_id": app_id,
@@ -1545,11 +1920,13 @@ async def get_deal_detail(
             "quality_breakdown": quality_breakdown[:8],  # Максимум 8 элементов
             "behavioral_signals": behavioral_signals[:10],  # Последние 10 сигналов
             "behavioral_last_days": behavioral_last_days,
-            "thesis": build_deal_thesis(
-                app_data=app_data,
+            "thesis": thesis_data,
+            "thesis_explain": build_thesis_explain(
+                thesis_data=thesis_data,
+                publisher_interest=thesis_data.get("publisher_interest", {}),
+                publisher_status_code=publisher_status,
                 signals=signals,
-                scores={"intent_score": intent_score_final, "quality_score": quality_score},
-                gates={"freshness_gate": freshness_gate, "success_penalty": success_penalty}
+                app_data=app_data
             )
         }
         

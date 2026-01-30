@@ -382,6 +382,160 @@ for test_app_id in 1410400 999999; do
 done
 echo
 
+echo "S11. Проверка thesis_explain (Vector #1)..."
+echo "  Проверка app_id=1410400..."
+DETAIL_JSON="$(CURL "$API_BASE/api/v1/deals/1410400/detail")"
+
+if echo "$DETAIL_JSON" | jq -e '.thesis_explain' > /dev/null 2>&1; then
+  echo "  ✅ PASS: app_id=1410400 — thesis_explain присутствует"
+  
+  # Проверяем структуру
+  HEADLINE="$(echo "$DETAIL_JSON" | jq -r '.thesis_explain.headline // ""')"
+  WHY_LEN="$(echo "$DETAIL_JSON" | jq -r '.thesis_explain.why | length')"
+    SIGNALS_LEN="$(echo "$DETAIL_JSON" | jq -r '.thesis_explain.signals | length')"
+    CONF_BREAKDOWN_LEN="$(echo "$DETAIL_JSON" | jq -r '.thesis_explain.confidence_breakdown | length')"
+    PUB_CONTEXT_NOTE="$(echo "$DETAIL_JSON" | jq -r '.thesis_explain.publisher_context.note // ""')"
+    PUB_STATUS_RU="$(echo "$DETAIL_JSON" | jq -r '.thesis_explain.publisher_context.publisher_status_ru // ""')"
+    NEXT_STEP="$(echo "$DETAIL_JSON" | jq -r '.thesis_explain.next_step // ""')"
+    
+    if [[ -n "$HEADLINE" ]]; then
+      echo "  ✅ PASS: headline присутствует"
+    else
+      echo "  ❌ FAIL: headline отсутствует"
+      fail=1
+    fi
+    
+    if [[ "$WHY_LEN" -ge 1 ]] && [[ "$WHY_LEN" -le 6 ]]; then
+      echo "  ✅ PASS: why содержит $WHY_LEN элементов (1-6)"
+    else
+      echo "  ❌ FAIL: why содержит $WHY_LEN элементов (ожидается 1-6)"
+      fail=1
+    fi
+    
+    if [[ "$SIGNALS_LEN" -le 3 ]]; then
+      echo "  ✅ PASS: signals содержит $SIGNALS_LEN элементов (≤3)"
+    else
+      echo "  ❌ FAIL: signals содержит $SIGNALS_LEN элементов (ожидается ≤3)"
+      fail=1
+    fi
+    
+    # Проверяем, что signals содержит days_ago (не published_at)
+    HAS_DAYS_AGO="$(echo "$DETAIL_JSON" | jq -r '.thesis_explain.signals[0] | has("days_ago")')"
+    if [[ "$HAS_DAYS_AGO" == "true" ]]; then
+      echo "  ✅ PASS: signals содержит days_ago (не published_at)"
+    else
+      echo "  ❌ FAIL: signals не содержит days_ago"
+      fail=1
+    fi
+    
+    if [[ "$CONF_BREAKDOWN_LEN" -eq 5 ]]; then
+      echo "  ✅ PASS: confidence_breakdown содержит 5 правил"
+    else
+      echo "  ❌ FAIL: confidence_breakdown содержит $CONF_BREAKDOWN_LEN правил (ожидается 5)"
+      fail=1
+    fi
+    
+    # Проверяем snippet <= 140 символов
+    SNIPPET_LEN="$(echo "$DETAIL_JSON" | jq -r '.thesis_explain.signals[0].snippet // "" | length')"
+    if [[ "$SNIPPET_LEN" -le 140 ]] || [[ "$SNIPPET_LEN" -eq 0 ]]; then
+      echo "  ✅ PASS: snippet длина ≤ 140 символов"
+    else
+      echo "  ❌ FAIL: snippet длина = $SNIPPET_LEN (ожидается ≤ 140)"
+      fail=1
+    fi
+    
+    # Проверяем publisher_context
+    if [[ -n "$PUB_STATUS_RU" ]]; then
+      echo "  ✅ PASS: publisher_context.publisher_status_ru присутствует"
+    else
+      echo "  ❌ FAIL: publisher_context.publisher_status_ru отсутствует"
+      fail=1
+    fi
+    
+    if [[ -n "$PUB_CONTEXT_NOTE" ]]; then
+      echo "  ✅ PASS: publisher_context.note присутствует"
+    else
+      echo "  ❌ FAIL: publisher_context.note отсутствует"
+      fail=1
+    fi
+    
+    # Проверяем next_step
+    if [[ -n "$NEXT_STEP" ]]; then
+      echo "  ✅ PASS: next_step присутствует"
+    else
+      echo "  ❌ FAIL: next_step отсутствует"
+      fail=1
+    fi
+else
+  echo "  ❌ FAIL: app_id=1410400 — thesis_explain отсутствует"
+  fail=1
+fi
+echo
+
+echo "S12. Проверка who_might_care_codes (Vector #3)..."
+for test_app_id in 1410400 999999; do
+  echo "  Проверка app_id=$test_app_id..."
+    DETAIL_JSON="$(CURL "$API_BASE/api/v1/deals/${test_app_id}/detail")"
+    
+  WHO_CODES="$(echo "$DETAIL_JSON" | jq -r '.thesis.publisher_interest.who_might_care_codes // []')"
+  WHO_CODES_TYPE="$(echo "$DETAIL_JSON" | jq -r '.thesis.publisher_interest.who_might_care_codes | type')"
+    
+    if [[ "$WHO_CODES_TYPE" == "array" ]]; then
+      echo "  ✅ PASS: app_id=$test_app_id — who_might_care_codes is array"
+      
+      # Проверяем, что все значения из допустимого списка
+      ALLOWED_CODES=("scout_fund" "genre_publisher" "marketing_publisher" "turnaround_publisher" "operator_publisher" "influencer_partner")
+      CODES_LEN="$(echo "$WHO_CODES" | jq -r 'length')"
+      
+      if [[ "$CODES_LEN" -gt 0 ]]; then
+        INVALID_COUNT=0
+        for code in $(echo "$WHO_CODES" | jq -r '.[]'); do
+          if [[ ! " ${ALLOWED_CODES[@]} " =~ " ${code} " ]]; then
+            INVALID_COUNT=$((INVALID_COUNT + 1))
+          fi
+        done
+        
+        if [[ "$INVALID_COUNT" -eq 0 ]]; then
+          echo "  ✅ PASS: app_id=$test_app_id — все коды из допустимого списка"
+        else
+          echo "  ❌ FAIL: app_id=$test_app_id — найдено $INVALID_COUNT недопустимых кодов"
+          fail=1
+        fi
+      else
+        echo "  ⚠️  WARNING: app_id=$test_app_id — who_might_care_codes пустой (может быть допустимо)"
+      fi
+    else
+      echo "  ❌ FAIL: app_id=$test_app_id — who_might_care_codes type = $WHO_CODES_TYPE (ожидается 'array')"
+      fail=1
+    fi
+done
+echo
+
+echo "S13. Проверка signal coverage после seed (Vector #4)..."
+echo "  Запуск seed_more_signals.sh..."
+if bash scripts/seed_more_signals.sh > /tmp/seed_output.log 2>&1; then
+  echo "  ✅ PASS: seed_more_signals.sh выполнен успешно"
+  
+  # Проверяем apps_with_signals >= 10
+  DB_SERVICE="${DB_SERVICE:-postgres}"
+  DB_NAME="${DB_NAME:-game_scout}"
+  DB_USER="${DB_USER:-postgres}"
+  
+  APPS_WITH_SIGNALS=$(docker compose exec -T "$DB_SERVICE" bash -lc "export PAGER=cat; psql -U '$DB_USER' -d '$DB_NAME' -Atc \"SELECT COUNT(DISTINCT app_id) FROM deal_intent_signal WHERE app_id IS NOT NULL;\"")
+  
+  if [[ "$APPS_WITH_SIGNALS" -ge 10 ]]; then
+    echo "  ✅ PASS: apps_with_signals = $APPS_WITH_SIGNALS (>= 10)"
+  else
+    echo "  ❌ FAIL: apps_with_signals = $APPS_WITH_SIGNALS (ожидается >= 10)"
+    fail=1
+  fi
+else
+  echo "  ❌ FAIL: seed_more_signals.sh завершился с ошибкой"
+  cat /tmp/seed_output.log
+  fail=1
+fi
+echo
+
 if [[ "$fail" -eq 0 ]]; then
   echo "=== ✅ ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ ==="
   exit 0
