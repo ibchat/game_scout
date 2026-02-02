@@ -48,6 +48,7 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
       LLM_MODEL: ${LLM_MODEL:-claude-3-5-sonnet-20241022}
       COMMENT_SAMPLE_SIZE: ${COMMENT_SAMPLE_SIZE:-200}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,6 +79,7 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
       LLM_MODEL: ${LLM_MODEL:-claude-3-5-sonnet-20241022}
       COMMENT_SAMPLE_SIZE: ${COMMENT_SAMPLE_SIZE:-200}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy
