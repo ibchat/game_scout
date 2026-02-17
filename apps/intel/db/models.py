@@ -280,6 +280,10 @@ class IntelEvent(Base, TimestampMixin):
     publish_channel: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # free/premium
     is_premium: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     autopublish_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    
+    # Significance scoring
+    significance_score: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    significance_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships
     cluster: Mapped[Optional["IntelCluster"]] = relationship("IntelCluster", back_populates="events")
@@ -296,6 +300,7 @@ class IntelEvent(Base, TimestampMixin):
         Index("idx_intel_events_publish_status", "publish_status"),
         Index("idx_intel_events_is_premium", "is_premium"),
         Index("idx_intel_events_autopublish_eligible", "autopublish_eligible"),
+        Index("idx_intel_events_significance_score", "significance_score"),
     )
 
 

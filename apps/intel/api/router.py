@@ -44,12 +44,21 @@ async def intel_health(db: Session = Depends(get_db_session)) -> Dict[str, Any]:
     except Exception as e:
         logger.warning(f"Failed to load policy for health check: {e}")
     
-    # Check Telegram config
+    # Check Telegram config and access
+    telegram_configured = False
+    telegram_ok = False
+    telegram_details = {}
     try:
+        from apps.intel.services.publishers.telegram_publisher import TelegramPublisher
         token, chat_id = get_telegram_config()
         telegram_configured = token is not None and chat_id is not None
-    except Exception:
-        pass
+        
+        if telegram_configured:
+            # Check actual access
+            publisher = TelegramPublisher(db)
+            telegram_ok, telegram_error, telegram_details = publisher.check_telegram_access()
+    except Exception as e:
+        logger.warning(f"Failed to check Telegram access: {e}")
     
     # Check DB
     try:
@@ -66,6 +75,8 @@ async def intel_health(db: Session = Depends(get_db_session)) -> Dict[str, Any]:
         "policy_version": policy_version,
         "policy_hash": policy_hash,
         "telegram_configured": telegram_configured,
+        "telegram_ok": telegram_ok,
+        "telegram_details": telegram_details if telegram_ok else {},
         "db_ok": db_ok
     }
 
@@ -207,6 +218,92 @@ async def run_pipeline(
     except Exception as e:
         logger.error(f"Pipeline failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Pipeline failed: {str(e)}")
+
+
+@router.post("/telegram/test")
+async def test_telegram(
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db_session),
+    _: None = Depends(check_intel_enabled),
+) -> Dict[str, Any]:
+    """
+    Test Telegram bot and channel access.
+    
+    Body:
+    {
+      "dry_run": true|false,
+      "text": "optional test message"
+    }
+    
+    If dry_run=true: only check access (getMe/getChat)
+    If dry_run=false: send test message to channel
+    """
+    from apps.intel.services.publishers.telegram_publisher import TelegramPublisher
+    from apps.intel.db.models import IntelPublishLog
+    from datetime import datetime
+    
+    dry_run = body.get("dry_run", True)
+    test_text = body.get("text", "🧪 Game Scout Intel test")
+    
+    publisher = TelegramPublisher(db)
+    
+    # Check access
+    access_ok, access_error, access_details = publisher.check_telegram_access()
+    
+    if not access_ok:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Telegram access check failed: {access_error}"
+        )
+    
+    if dry_run:
+        return {
+            "status": "ok",
+            "message": "Telegram access verified (dry run)",
+            "bot_username": access_details.get("bot_username"),
+            "chat_title": access_details.get("chat_title"),
+            "chat_type": access_details.get("chat_type")
+        }
+    
+    # Send test message
+    test_message = f"{test_text} - {datetime.utcnow().isoformat()}"
+    
+    try:
+        success, message_id, error = publisher._send_to_telegram(test_message)
+        
+        if success:
+            # Log as test publish
+            test_event_id = None  # No real event for test
+            # Create a minimal log entry
+            publish_log = IntelPublishLog(
+                event_id=test_event_id or db.query(IntelEvent).first().id if db.query(IntelEvent).count() > 0 else None,
+                channel_id="free",
+                telegram_message_id=message_id or "test",
+                status="published",
+                payload={"test": True, "message": test_message[:100]}
+            )
+            if publish_log.event_id:
+                db.add(publish_log)
+                db.commit()
+            
+            return {
+                "status": "ok",
+                "message": "Test message sent successfully",
+                "message_id": message_id,
+                "bot_username": access_details.get("bot_username"),
+                "chat_title": access_details.get("chat_title")
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to send test message: {error}"
+            )
+    except Exception as e:
+        logger.error(f"Telegram test failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Telegram test failed: {str(e)}"
+        )
 
 
 @router.post("/run-steam-feed")

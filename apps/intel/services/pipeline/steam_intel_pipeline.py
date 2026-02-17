@@ -13,6 +13,7 @@ from apps.intel.db.models import (
 from apps.intel.services.collectors import RSSCollector, SteamNewsCollector
 from apps.intel.services.business_brief_generator import generate_business_brief, classify_signal_type
 from apps.intel.services.publishers.telegram_publisher import TelegramPublisher
+from apps.intel.services.significance import score_event
 from apps.intel.policy.policy_engine import load_policy, validate_source_url
 
 logger = logging.getLogger(__name__)
@@ -108,16 +109,45 @@ def create_or_update_event(
         event = IntelEvent(
             cluster_id=cluster.id,
             event_type=signal_type,
-            score=0,  # Can be calculated later
+            score=0,  # Legacy field, use significance_score instead
             status="ready",
             title_ru=title_ru,
             what_happened_ru=what_happened_ru,
             why_it_matters_ru=None,  # Will be filled by brief generator
             sources=[extracted_item.url_norm] if extracted_item.url_norm else [],
-            autopublish_eligible=True
+            autopublish_eligible=False  # Will be calculated after scoring
         )
         
         db.add(event)
+        db.commit()
+        db.refresh(event)
+        
+        # Calculate significance score
+        policy = load_policy()
+        score, reason, category, confidence = score_event(event, extracted_item, policy)
+        
+        # Update event with significance
+        event.significance_score = score
+        event.significance_reason = reason
+        event.event_type = category  # Update category if changed
+        
+        # Calculate eligibility based on significance thresholds
+        sig_config = policy.get("significance", {})
+        min_score = sig_config.get("min_score_to_autopublish", 55)
+        min_confidence = sig_config.get("min_confidence_to_autopublish", 0.75)
+        always_publish = sig_config.get("always_publish_categories", [])
+        never_autopublish = sig_config.get("never_autopublish_categories", [])
+        
+        # Eligibility logic
+        eligible = (
+            (score >= min_score or category in always_publish) and
+            confidence >= min_confidence and
+            category not in never_autopublish and
+            category in allowed_types
+        )
+        
+        event.autopublish_eligible = eligible
+        
         db.commit()
         db.refresh(event)
         
@@ -221,7 +251,49 @@ def run_pipeline(
             events.append(event)
             events_created += 1
     
-    # Step 4: Generate briefs and publish
+    # Step 4: Calculate significance for all events (if not already calculated)
+    policy = load_policy()
+    sig_config = policy.get("significance", {})
+    min_score = sig_config.get("min_score_to_autopublish", 55)
+    min_confidence = sig_config.get("min_confidence_to_autopublish", 0.75)
+    always_publish = sig_config.get("always_publish_categories", [])
+    never_autopublish = sig_config.get("never_autopublish_categories", [])
+    
+    eligible_count = 0
+    for event in events:
+        # Recalculate significance if not set
+        if event.significance_score == 0 or not event.significance_reason:
+            # Get extracted item for this event
+            extracted_item = None
+            if event.cluster_id:
+                cluster = db.query(IntelCluster).filter(IntelCluster.id == event.cluster_id).first()
+                if cluster:
+                    extracted_item = db.query(IntelExtractedItem).filter(
+                        IntelExtractedItem.id == cluster.representative_extracted_id
+                    ).first()
+            
+            score, reason, category, confidence = score_event(event, extracted_item, policy)
+            event.significance_score = score
+            event.significance_reason = reason
+            event.event_type = category
+            
+            # Recalculate eligibility
+            eligible = (
+                (score >= min_score or category in always_publish) and
+                confidence >= min_confidence and
+                category not in never_autopublish and
+                category in allowed_types
+            )
+            event.autopublish_eligible = eligible
+            
+            if eligible:
+                eligible_count += 1
+            
+            db.commit()
+        elif event.autopublish_eligible:
+            eligible_count += 1
+    
+    # Step 5: Generate briefs and publish
     publisher = TelegramPublisher(db)
     published_count = 0
     skipped_count = 0
@@ -229,6 +301,38 @@ def run_pipeline(
     
     for event in events:
         try:
+            # Skip if not eligible
+            if not event.autopublish_eligible:
+                # Create publish log with skipped status
+                from apps.intel.db.models import IntelPublishLog
+                skip_reason = "below_threshold"
+                if event.significance_score < min_score:
+                    skip_reason = "below_threshold"
+                elif event.event_type in never_autopublish:
+                    skip_reason = "blocked_category"
+                else:
+                    skip_reason = "not_eligible"
+                
+                # Check if already logged
+                existing_log = db.query(IntelPublishLog).filter(
+                    IntelPublishLog.event_id == event.id,
+                    IntelPublishLog.status == "skipped"
+                ).first()
+                
+                if not existing_log:
+                    publish_log = IntelPublishLog(
+                        event_id=event.id,
+                        channel_id="free",
+                        telegram_message_id="",
+                        status="skipped",
+                        error=skip_reason
+                    )
+                    db.add(publish_log)
+                    db.commit()
+                
+                skipped_count += 1
+                continue
+            
             # Check if event type is allowed
             if event.event_type not in allowed_types:
                 logger.debug(f"Event type {event.event_type} not in allowed_types, skipping")
@@ -265,6 +369,7 @@ def run_pipeline(
         "collected": collected_count,
         "extracted": extracted_count,
         "events_created": events_created,
+        "eligible_count": eligible_count,
         "briefs_generated": briefs_generated,
         "published": published_count,
         "skipped": skipped_count,

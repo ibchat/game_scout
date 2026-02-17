@@ -52,3 +52,10 @@ limits:
 moderation:
   unresolved_entity_policy: needs_review
   low_confidence_threshold: 0.75
+
+# Significance scoring and filtering
+significance:
+  min_score_to_autopublish: 55
+  min_confidence_to_autopublish: 0.75
+  always_publish_categories: [funding, publisher_deal]
+  never_autopublish_categories: [controversy]
