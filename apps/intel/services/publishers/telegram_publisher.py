@@ -38,6 +38,13 @@ class TelegramPublisher:
             self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
         else:
             self.base_url = None
+        
+        # Try to auto-detect chat_id if not set but token is available
+        if self.bot_token and not self.chat_id:
+            auto_chat_id = self._try_get_chat_id_from_updates()
+            if auto_chat_id:
+                self.chat_id = auto_chat_id
+                logger.info(f"Auto-detected TELEGRAM_CHAT_ID: {auto_chat_id}")
     
     def _check_rate_limits(self) -> tuple[bool, Optional[str]]:
         """Check if rate limits allow publishing"""
@@ -300,14 +307,9 @@ class TelegramPublisher:
         if not self.bot_token:
             return False, "TELEGRAM_BOT_TOKEN not configured", {}
         
-        # Try to auto-detect chat_id from updates if not set
+        # chat_id should be set by __init__ or auto-detection
         if not self.chat_id:
-            auto_chat_id = self._try_get_chat_id_from_updates()
-            if auto_chat_id:
-                self.chat_id = auto_chat_id
-                logger.info(f"Auto-detected TELEGRAM_CHAT_ID from updates: {auto_chat_id}")
-            else:
-                return False, "TELEGRAM_CHAT_ID not configured and could not be auto-detected. Add bot to channel and forward a message, or set TELEGRAM_CHAT_ID manually.", {}
+            return False, "TELEGRAM_CHAT_ID not configured. Set TELEGRAM_CHAT_ID environment variable or ensure bot has received messages from channel.", {}
         
         if not self.base_url:
             return False, "Telegram base_url not configured", {}

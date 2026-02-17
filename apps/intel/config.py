@@ -59,10 +59,15 @@ def can_auto_publish() -> bool:
 
 
 def get_telegram_config() -> tuple[Optional[str], Optional[str]]:
-    """Get Telegram bot token and chat ID. Returns (token, chat_id) or (None, None) if not configured."""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    """
+    Get Telegram bot token and chat ID. 
+    Returns (token, chat_id) - token may be set even if chat_id is not (for auto-detection).
+    Returns (None, None) only if token is not configured.
+    """
+    if not TELEGRAM_BOT_TOKEN:
         return None, None
-    return TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+    # Return token even if chat_id is not set - TelegramPublisher can try auto-detection
+    return TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID if TELEGRAM_CHAT_ID else None
 
 
 def get_telegram_channel_config(channel: str = "free") -> tuple[Optional[str], Optional[str]]:
