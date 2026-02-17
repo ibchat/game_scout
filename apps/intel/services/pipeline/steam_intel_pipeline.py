@@ -25,6 +25,8 @@ def extract_from_raw_item(raw_item: IntelRawItem, db: Session) -> Optional[Intel
     """
     Simple extractor: creates IntelExtractedItem from IntelRawItem.
     Uses model fields: lang, title_norm, url_norm, text, meta.
+    
+    Now includes Steam relevance filter.
     """
     try:
         # Check if already extracted
@@ -35,19 +37,44 @@ def extract_from_raw_item(raw_item: IntelRawItem, db: Session) -> Optional[Intel
         if existing:
             return existing
         
-        # Detect language
-        from apps.intel.services.business_brief_generator import detect_language
+        # Get text for Steam relevance check
         text = raw_item.snippet or raw_item.title or ""
-        lang = detect_language(text)
+        url_text = raw_item.url or ""
+        combined_text = f"{text} {url_text}"
+        
+        # Check Steam relevance (policy requirement)
+        policy = load_policy()
+        steam_relevance_required = policy.get("steam_relevance_required", True)
+        
+        relevance_reason = None
+        if steam_relevance_required:
+            is_relevant, relevance_reason = detect_steam_relevance(combined_text)
+            if not is_relevant:
+                logger.debug(f"Raw item {raw_item.id} skipped: not Steam-relevant ({relevance_reason})")
+                return None  # Skip non-Steam items
+        
+        # Detect language
+        from apps.intel.services.business_brief_generator import detect_language as detect_lang
+        lang = detect_lang(text)
+        
+        # Extract Steam appid if present
+        appid = extract_steam_appid(combined_text)
         
         # Create extracted item
+        meta = {
+            "snippet": raw_item.snippet,
+            "raw_payload": raw_item.raw_payload,
+            "steam_appid": appid,
+            "relevance_reason": relevance_reason if steam_relevance_required else None
+        }
+        
         extracted = IntelExtractedItem(
             raw_item_id=raw_item.id,
             lang=lang,
             title_norm=raw_item.title or "",
             url_norm=raw_item.url,
             text=text,
-            meta={"snippet": raw_item.snippet, "raw_payload": raw_item.raw_payload}
+            meta=meta
         )
         
         db.add(extracted)
