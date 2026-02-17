@@ -29,6 +29,58 @@ def check_migration_chain() -> SupervisorResult:
         )
     
     # Check for multiple heads (basic check)
+    # First check if Docker is available
+    try:
+        docker_check = subprocess.run(
+            ["docker", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if docker_check.returncode != 0:
+            warnings.append("Docker not available, skipping migration chain check")
+            return SupervisorResult(
+                stage="migration_chain",
+                status=StageStatus.WARN,
+                errors=[],
+                warnings=warnings
+            )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        warnings.append("Docker not found in PATH, skipping migration chain check")
+        return SupervisorResult(
+            stage="migration_chain",
+            status=StageStatus.WARN,
+            errors=[],
+            warnings=warnings
+        )
+    
+    # Check if service is running
+    try:
+        service_check = subprocess.run(
+            ["docker", "compose", "ps", config.DOCKER_SERVICE_API, "--format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if service_check.returncode != 0:
+            warnings.append(f"Service {config.DOCKER_SERVICE_API} not running, skipping migration chain check")
+            return SupervisorResult(
+                stage="migration_chain",
+                status=StageStatus.WARN,
+                errors=[],
+                warnings=warnings
+            )
+    except Exception as e:
+        warnings.append(f"Cannot check service status: {str(e)}")
+        return SupervisorResult(
+            stage="migration_chain",
+            status=StageStatus.WARN,
+            errors=[],
+            warnings=warnings
+        )
+    
+    # Now check migration heads
     try:
         result = subprocess.run(
             ["docker", "compose", "exec", "-T", config.DOCKER_SERVICE_API, "alembic", "heads"],
@@ -38,8 +90,7 @@ def check_migration_chain() -> SupervisorResult:
         )
         
         if result.returncode != 0:
-            # Docker might not be available - this is a warning, not error
-            warnings.append("Cannot check migration heads (Docker not available or service not running)")
+            errors.append(f"Alembic heads check failed: {result.stderr[:200]}")
         else:
             output = result.stdout.strip()
             heads = [line.strip() for line in output.split('\n') if line.strip() and not line.startswith('INFO:')]
@@ -49,15 +100,23 @@ def check_migration_chain() -> SupervisorResult:
             elif len(heads) == 0:
                 warnings.append("No Alembic heads found")
         
-    except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError) as e:
-        warnings.append(f"Cannot check migration heads: {str(e)}")
+    except subprocess.TimeoutExpired:
+        errors.append("Migration heads check timed out after 30 seconds")
+    except (FileNotFoundError, subprocess.SubprocessError) as e:
+        errors.append(f"Failed to check migration heads: {str(e)}")
     
     # Check migration files exist
     migration_files = list(migrations_dir.glob("*.py"))
     if not migration_files:
         errors.append("No migration files found")
     
-    status = StageStatus.FAIL if errors else (StageStatus.WARN if warnings else StageStatus.OK)
+    # Determine status: FAIL if errors, WARN if warnings only, OK otherwise
+    if errors:
+        status = StageStatus.FAIL
+    elif warnings:
+        status = StageStatus.WARN
+    else:
+        status = StageStatus.OK
     
     return SupervisorResult(
         stage="migration_chain",

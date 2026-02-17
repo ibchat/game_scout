@@ -2,6 +2,12 @@
 """
 Dev Supervisor - Main entry point
 Autonomous orchestrator for development workflow
+
+Run as module:
+    python -m dev_supervisor.run
+
+Or directly:
+    python dev_supervisor/run.py
 """
 import sys
 import os
@@ -9,9 +15,26 @@ import logging
 from pathlib import Path
 from typing import List
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+# Determine project root: if running as module, __file__ is in dev_supervisor/
+# If running directly, __file__ is dev_supervisor/run.py
+if __name__ == "__main__":
+    # Running directly: dev_supervisor/run.py -> parent.parent = root
+    project_root = Path(__file__).parent.parent
+else:
+    # Running as module: __file__ is dev_supervisor/__init__.py or run.py
+    # Find root by looking for pyproject.toml or docker-compose.yml
+    current = Path(__file__).parent
+    while current != current.parent:
+        if (current / "pyproject.toml").exists() or (current / "docker-compose.yml").exists():
+            project_root = current
+            break
+        current = current.parent
+    else:
+        project_root = Path(__file__).parent.parent
+
+# Add project root to path only if not already there
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 from dev_supervisor.config import config
 from dev_supervisor.report import SupervisorResult, StageStatus, aggregate_results, SupervisorReport
