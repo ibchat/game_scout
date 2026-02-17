@@ -4,8 +4,14 @@ Dev Supervisor - Main entry point
 Autonomous orchestrator for development workflow
 """
 import sys
+import os
 import logging
+from pathlib import Path
 from typing import List
+
+# Add project root to path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 from dev_supervisor.config import config
 from dev_supervisor.report import SupervisorResult, StageStatus, aggregate_results, SupervisorReport
