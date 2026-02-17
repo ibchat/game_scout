@@ -143,6 +143,16 @@ TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_CHAT_ID=your_chat_id_here
 ```
 
+**Note:** Store bot token securely. Never commit tokens to git. Use `.env` file (which is in `.gitignore`).
+
+**Example `.env` entry:**
+```env
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+```
+
+**Important:** The `.env` file is in `.gitignore` and should never be committed. Store tokens locally only.
+
 ### Pipeline Configuration
 
 ```env

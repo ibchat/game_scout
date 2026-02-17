@@ -25,7 +25,9 @@ INTEL_LLM_MODEL_STRONG = os.getenv("INTEL_LLM_MODEL_STRONG", "claude-3-5-sonnet-
 
 # Telegram configuration
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()  # Legacy, use FREE/PREMIUM if available
+TELEGRAM_CHAT_ID_FREE = os.getenv("TELEGRAM_CHAT_ID_FREE", "").strip()
+TELEGRAM_CHAT_ID_PREMIUM = os.getenv("TELEGRAM_CHAT_ID_PREMIUM", "").strip()
 
 # Pipeline configuration
 INTEL_COLLECT_INTERVAL_MINUTES = int(os.getenv("INTEL_COLLECT_INTERVAL_MINUTES", "60"))
@@ -52,3 +54,40 @@ def get_telegram_config() -> tuple[Optional[str], Optional[str]]:
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return None, None
     return TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+
+
+def get_telegram_channel_config(channel: str = "free") -> tuple[Optional[str], Optional[str]]:
+    """
+    Get Telegram bot token and chat ID for specific channel (free/premium).
+    
+    Args:
+        channel: "free" or "premium"
+    
+    Returns:
+        (token, chat_id) or (None, None) if not configured
+    
+    Raises:
+        ValueError: If premium channel requested but not configured
+    """
+    if not TELEGRAM_BOT_TOKEN:
+        return None, None
+    
+    if channel == "premium":
+        if not TELEGRAM_CHAT_ID_PREMIUM:
+            raise ValueError("TELEGRAM_CHAT_ID_PREMIUM not configured. Premium channel requires separate chat ID.")
+        return TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID_PREMIUM
+    else:  # free
+        # Use FREE if available, fallback to legacy TELEGRAM_CHAT_ID
+        chat_id = TELEGRAM_CHAT_ID_FREE or TELEGRAM_CHAT_ID
+        if not chat_id:
+            return None, None
+        return TELEGRAM_BOT_TOKEN, chat_id
+
+
+def is_telegram_configured(channel: str = "free") -> bool:
+    """Check if Telegram is configured for given channel."""
+    try:
+        token, chat_id = get_telegram_channel_config(channel)
+        return token is not None and chat_id is not None
+    except ValueError:
+        return False

@@ -1,100 +1,114 @@
 # Architecture Decisions
 
-This document tracks key architectural decisions made during development, especially those introduced by AI-assisted development.
+## Steam/Market Intel → Business Brief → Telegram (Free/Premium)
 
-## Format
+**Date:** 2026-02-17  
+**Status:** Implementation in progress
 
-Each decision includes:
-- **What changed**: Brief description of the change
-- **Why it exists**: Rationale and context
-- **What to remove later**: If this is temporary or should be refactored later
+### Current State Audit
 
----
+#### Existing Models (IntelEvent)
+- ✅ `business_brief_json` (JSONB) - already exists
+- ✅ `business_brief_generated_at` (datetime) - already exists
+- ✅ `publish_status` (draft/published/failed) - already exists
+- ✅ `publish_channel` (string) - already exists
+- ✅ `is_premium` (boolean) - already exists
+- ✅ `telegram_message_id` - already exists
+- ✅ `published_at` - already exists
 
-## 2026-01-19: Dev Supervisor Autopilot C+
+#### Existing Models (IntelPublishLog)
+- ✅ `channel_id` (string) - exists, but needs to be used as "free"/"premium"
+- ✅ `telegram_message_id` - already exists
+- ✅ `payload` (JSONB) - already exists
+- ❌ `status` (published/failed/skipped) - **NEEDS TO BE ADDED**
+- ❌ `error` (text) - **NEEDS TO BE ADDED**
 
-### What changed
-- Created `dev_supervisor/` module with autonomous orchestrator
-- Added container detection logic (`_is_inside_container()`) across multiple modules
-- Added autofix system with whitelist of safe fixes
-- Modified `gs-dev.sh` to be host-only with readiness checks
+#### Existing Services
+- ✅ `steam_brief_generator.py` - exists but needs format update
+- ✅ `telegram_publisher.py` - exists but needs FREE/PREMIUM channel support
+- ✅ `/run-steam-feed` endpoint - exists but needs refactoring
 
-### Why it exists
-- **Container detection**: Supervisor runs both on host and inside containers. Need to detect context to avoid Docker-in-Docker issues.
-- **Autofix**: Common issues (missing imports, git in Dockerfiles) can be fixed automatically without human intervention.
-- **Host-only gs-dev.sh**: Prevents confusion when script is run inside container (which doesn't work).
+#### Policy Structure
+- ✅ `telegram_template` with `max_chars: 3500` and format list
+- ✅ `allowed_event_types_for_autopublish` - configured
+- ✅ `limits.max_posts_per_hour` and `max_posts_per_day` - configured
 
-### What to remove later
-- If we standardize on always running supervisor inside container, remove host detection logic.
-- Autofix system can be expanded but should remain whitelist-only (never auto-delete files or change migrations).
+### What We're Adding
 
----
+1. **Config Updates:**
+   - `TELEGRAM_CHAT_ID_FREE` and `TELEGRAM_CHAT_ID_PREMIUM` (separate from `TELEGRAM_CHAT_ID`)
+   - Function to get channel configs
 
-## 2026-01-19: Intel Module Container Detection
+2. **Migration:**
+   - Add `status` and `error` fields to `IntelPublishLog`
 
-### What changed
-- `orchestrator_smoke.py` and `test_runner.py` detect container via `/.dockerenv` or `IN_DOCKER` env var
-- Health endpoint path fixed: `/api/v1/intel/health` (not `/intel/health`)
+3. **Business Brief Format Update:**
+   - Change from current format to:
+     ```json
+     {
+       "title": "...",
+       "what_happened": "...",
+       "why_it_matters": "...",
+       "key_points": ["...", "..."],
+       "signal_type": "release|patch_major|...",
+       "confidence": 0.0-1.0,
+       "sources": ["url1", "url2"],
+       "language": "ru"
+     }
+     ```
 
-### Why it exists
-- Intel health check was failing with 404 because endpoint path was incorrect
-- Smoke tests need to run directly inside container, not via docker compose exec
+4. **Pipeline Orchestrator:**
+   - New service: `apps/intel/services/pipeline/steam_intel_pipeline.py`
+   - Flow: collect → extract → event → brief → publish
+   - Idempotency: check `IntelPublishLog` for existing (event_id, channel) before publishing
 
-### What to remove later
-- If we standardize on single execution context, simplify detection logic.
+5. **API Endpoints:**
+   - `POST /api/v1/intel/pipeline/run` - new endpoint with body params
+   - `GET /api/v1/intel/health` - update to include telegram_config_present, db_ok
 
----
+6. **Celery Tasks:**
+   - `run_intel_pipeline_free` - every 30-60 minutes
+   - `run_intel_pipeline_premium` - every 15-30 minutes
 
-## 2026-01-19: Git in Dockerfiles
+7. **Tests:**
+   - `test_telegram_template.py`
+   - `test_pipeline_idempotency.py`
+   - `scripts/intel_smoke_publish_dry_run.py`
 
-### What changed
-- Added `git` to `apt-get install` in both `docker/api.Dockerfile` and `docker/worker.Dockerfile`
+### Why This Architecture
 
-### Why it exists
-- `guardrail.sh` uses git commands and fails with "git: command not found" inside containers
-- Needed for guardrails to work inside Docker
+1. **No New Tables:** All data fits into existing `IntelEvent` and `IntelPublishLog` models. Only adding 2 fields to `IntelPublishLog`.
 
-### What to remove later
-- If guardrails are moved to host-only, git can be removed from Dockerfiles to reduce image size.
+2. **Idempotency:** Using `(event_id, channel_id)` as unique key in `IntelPublishLog` prevents duplicate publishes.
 
----
+3. **Channel Separation:** FREE vs PREMIUM handled via:
+   - `is_premium` flag on `IntelEvent`
+   - Separate `TELEGRAM_CHAT_ID_FREE` and `TELEGRAM_CHAT_ID_PREMIUM` env vars
+   - `channel_id` in `IntelPublishLog` tracks which channel was used
 
-## 2026-01-19: pytest in Dev Dependencies
+4. **Pipeline Orchestrator:** Single service coordinates all stages, making it easy to test and maintain.
 
-### What changed
-- `docker/api.Dockerfile` changed from `poetry install --only main` to `poetry install` (includes dev deps)
+5. **Rules-based Fallback:** If LLM unavailable, use simple text summarization from `extracted_text` without LLM calls.
 
-### Why it exists
-- Contract tests require pytest, which is in dev dependencies
-- Supervisor needs to run tests inside container
+### Risks & Mitigations
 
-### What to remove later
-- If we move tests to separate CI stage, can revert to `--only main` to reduce image size.
+1. **Risk:** LLM unavailable → fallback to rules-based summarizer
+   - **Mitigation:** Implement simple text extraction and bullet points from `extracted_text`
 
----
+2. **Risk:** Duplicate publishes
+   - **Mitigation:** Check `IntelPublishLog` for existing `(event_id, channel_id)` before publishing
 
-## 2026-01-19: Intel Collectors Unified Contract
+3. **Risk:** Telegram API failures
+   - **Mitigation:** Retry with backoff (3 attempts, 1/2/4 seconds), save error in `IntelPublishLog.status` and `error` fields
 
-### What changed
-- All collectors (`RSSCollector`, `SteamNewsCollector`, `RedditRSSCollector`) now:
-  - Accept `db: Session` in `__init__`
-  - Implement `collect_source(self, source: IntelSource) -> int`
-  - Use `self.db` consistently
+### Next Steps
 
-### Why it exists
-- Unified interface makes collectors interchangeable
-- Easier to test and mock
-- Consistent error handling
-
-### What to remove later
-- None - this is the target architecture.
-
----
-
-## Complexity Warnings
-
-The supervisor will warn if:
-- A file exceeds 600 lines
-- More than 5 new modules are added in a single commit
-
-These are warnings, not blockers, but should prompt review.
+1. Update config for FREE/PREMIUM channels
+2. Create migration for `IntelPublishLog.status` and `error`
+3. Update business brief generator to new format
+4. Update Telegram publisher for FREE/PREMIUM channels
+5. Create pipeline orchestrator
+6. Add API endpoints
+7. Add Celery tasks
+8. Add tests
+9. Update Dev Supervisor

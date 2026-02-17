@@ -25,13 +25,16 @@ def check_intel_enabled():
 
 
 @router.get("/health")
-async def intel_health() -> Dict[str, Any]:
+async def intel_health(db: Session = Depends(get_db_session)) -> Dict[str, Any]:
     """Health check for Intel module."""
     from apps.intel.policy.policy_engine import load_policy, get_policy_hash
+    from apps.intel.config import get_telegram_config
     
     policy_loaded = False
     policy_version = None
     policy_hash = None
+    telegram_configured = False
+    db_ok = False
     
     try:
         policy = load_policy()
@@ -41,13 +44,29 @@ async def intel_health() -> Dict[str, Any]:
     except Exception as e:
         logger.warning(f"Failed to load policy for health check: {e}")
     
+    # Check Telegram config
+    try:
+        token, chat_id = get_telegram_config()
+        telegram_configured = token is not None and chat_id is not None
+    except Exception:
+        pass
+    
+    # Check DB
+    try:
+        db.execute("SELECT 1")
+        db_ok = True
+    except Exception:
+        pass
+    
     return {
         "status": "ok" if is_intel_enabled() else "disabled",
         "module": "intel",
         "enabled": is_intel_enabled(),
         "policy_loaded": policy_loaded,
         "policy_version": policy_version,
-        "policy_hash": policy_hash
+        "policy_hash": policy_hash,
+        "telegram_configured": telegram_configured,
+        "db_ok": db_ok
     }
 
 
@@ -146,14 +165,48 @@ async def update_intel_source(
     return {"status": "ok", "message": "Source updated"}
 
 
-@router.post("/actions/run_pipeline")
-async def run_pipeline_manually(
+@router.post("/pipeline/run")
+async def run_pipeline(
+    body: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db_session),
     _: None = Depends(check_intel_enabled),
 ) -> Dict[str, Any]:
-    """Manually trigger Intel pipeline task (for testing)."""
-    # TODO: Implement in Commit 11
-    return {"status": "ok", "message": "Pipeline task queued"}
+    """
+    Run Steam Intel pipeline.
+    
+    Body:
+    {
+      "sources": ["steam_rss", "Steam News"],
+      "dry_run": false
+    }
+    
+    Returns:
+    {
+      "collected": int,
+      "extracted": int,
+      "events_created": int,
+      "briefs_generated": int,
+      "published": int,
+      "skipped": int
+    }
+    """
+    from apps.intel.services.pipeline.steam_intel_pipeline import run_pipeline as run_intel_pipeline
+    
+    sources = body.get("sources", [])
+    dry_run = body.get("dry_run", False)
+    
+    if not sources:
+        raise HTTPException(status_code=400, detail="sources list is required")
+    
+    try:
+        result = run_intel_pipeline(sources=sources, db=db, dry_run=dry_run)
+        return {
+            "status": "ok",
+            **result
+        }
+    except Exception as e:
+        logger.error(f"Pipeline failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Pipeline failed: {str(e)}")
 
 
 @router.post("/run-steam-feed")

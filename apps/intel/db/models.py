@@ -277,8 +277,9 @@ class IntelEvent(Base, TimestampMixin):
     
     # Publish status and channel
     publish_status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, server_default="draft")  # draft/published/failed
-    publish_channel: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # public/premium
+    publish_channel: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # free/premium
     is_premium: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    autopublish_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
 
     # Relationships
     cluster: Mapped[Optional["IntelCluster"]] = relationship("IntelCluster", back_populates="events")
@@ -294,6 +295,7 @@ class IntelEvent(Base, TimestampMixin):
         Index("idx_intel_events_cluster_id", "cluster_id"),
         Index("idx_intel_events_publish_status", "publish_status"),
         Index("idx_intel_events_is_premium", "is_premium"),
+        Index("idx_intel_events_autopublish_eligible", "autopublish_eligible"),
     )
 
 
@@ -317,9 +319,11 @@ class IntelPublishLog(Base):
         nullable=False,
         server_default=sa.text('now()')
     )
-    channel_id: Mapped[str] = mapped_column(Text, nullable=False)
+    channel_id: Mapped[str] = mapped_column(Text, nullable=False)  # "free" or "premium"
     telegram_message_id: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # "published"/"failed"/"skipped"
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Error message if failed
 
     # Relationships
     event: Mapped["IntelEvent"] = relationship("IntelEvent", back_populates="publish_logs")
@@ -327,6 +331,7 @@ class IntelPublishLog(Base):
     __table_args__ = (
         Index("idx_intel_publish_log_event_id", "event_id"),
         Index("idx_intel_publish_log_published_at", "published_at"),
+        Index("idx_intel_publish_log_status", "status"),
     )
 
 

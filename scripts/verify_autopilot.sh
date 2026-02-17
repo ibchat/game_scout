@@ -165,6 +165,36 @@ else
 fi
 echo ""
 
+# 7) Check policy allowlist
+echo "7. Checking Intel policy allowlist..."
+POLICY_CHECK=$(docker compose exec -T api python -c "
+import sys
+try:
+    from apps.intel.policy.policy_engine import load_policy
+    policy = load_policy()
+    allowed_domains = policy.get('allowed_domains', [])
+    if allowed_domains:
+        print(f'OK:{len(allowed_domains)} domains')
+        sys.exit(0)
+    else:
+        print('WARN:allowed_domains is empty')
+        sys.exit(0)
+except Exception as e:
+    print(f'ERROR:{e}')
+    sys.exit(1)
+" 2>&1)
+
+if echo "$POLICY_CHECK" | grep -q "OK:"; then
+    DOMAIN_COUNT=$(echo "$POLICY_CHECK" | grep "OK:" | cut -d: -f2 | cut -d' ' -f1)
+    echo "   ✅ Policy allowlist has $DOMAIN_COUNT domain(s)"
+elif echo "$POLICY_CHECK" | grep -q "WARN:"; then
+    echo "   ⚠️  Policy allowlist is empty (warn only, not blocking)"
+else
+    echo "   ❌ Failed to check policy allowlist: $POLICY_CHECK"
+    ERRORS=$((ERRORS + 1))
+fi
+echo ""
+
 # Summary
 echo "================================"
 if [ $ERRORS -eq 0 ]; then

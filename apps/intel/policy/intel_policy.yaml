@@ -3,9 +3,12 @@
 
 version: 1.0
 
-# Source filtering
+# Source filtering (Steam-only for autopublish)
 allowed_domains:
-  - store.steampowered.com  # Steam RSS feeds for smoke testing
+  - store.steampowered.com
+  - steamcommunity.com
+  - steamdb.info
+  - rss.steampowered.com
 blocked_domains: []
 
 # Event types configuration

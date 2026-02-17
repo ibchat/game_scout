@@ -65,3 +65,16 @@ from apps.worker.tasks.discover_discord_invites import discover_discord_invites_
 from apps.worker.tasks.resolve_discord_invite import resolve_discord_invite_task  # noqa: F401,E402
 from apps.worker.tasks.rank_discord_candidates import rank_discord_candidates_task  # noqa: F401,E402
 from apps.worker.tasks.sync_guild_channels import sync_guild_channels_task  # noqa: F401,E402
+
+# Intel tasks
+from apps.worker.tasks.publish_steam_intel import publish_steam_intel_task  # noqa: F401,E402
+
+# Beat schedule - periodic tasks
+from celery.schedules import crontab
+
+celery_app.conf.beat_schedule = {
+    "publish-steam-intel": {
+        "task": "publish_steam_intel",
+        "schedule": crontab(minute="*/120"),  # Every 2 hours
+    },
+}

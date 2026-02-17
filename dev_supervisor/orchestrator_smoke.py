@@ -134,6 +134,8 @@ def run_orchestrator_smoke() -> SupervisorResult:
     
     # Check 6: Run actual RSS collection smoke test
     smoke_script = Path("scripts/intel_smoke_collect_rss.py")
+    smoke_publish_script = Path("scripts/intel_smoke_publish_dry_run.py")
+    
     if smoke_script.exists():
         if _is_inside_container():
             # Inside container: run directly
