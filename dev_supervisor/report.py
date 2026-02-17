@@ -120,6 +120,11 @@ def aggregate_results(results: List[SupervisorResult]) -> SupervisorReport:
     
     summary = ". ".join(summary_parts) if summary_parts else "No issues detected"
     
+    # Complexity warnings (D2)
+    complexity_warnings = _check_complexity(results)
+    if complexity_warnings:
+        summary += f". {len(complexity_warnings)} complexity warning(s)"
+    
     return SupervisorReport(
         stable=stable,
         stages=results,
@@ -129,3 +134,43 @@ def aggregate_results(results: List[SupervisorResult]) -> SupervisorReport:
         passed_stages=passed,
         failed_stages=failed
     )
+
+
+def _check_complexity(results: List[SupervisorResult]) -> List[str]:
+    """Check for complexity issues (D2)"""
+    warnings = []
+    
+    # Check file sizes (if we have access to git)
+    try:
+        import subprocess
+        from pathlib import Path
+        
+        project_root = Path(__file__).parent.parent.parent
+        result = subprocess.run(
+            ["git", "diff", "--name-only", "HEAD"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        
+        if result.returncode == 0:
+            changed_files = result.stdout.strip().split("\n")
+            for file_path in changed_files:
+                if not file_path:
+                    continue
+                full_path = project_root / file_path
+                if full_path.exists() and full_path.is_file():
+                    line_count = len(full_path.read_text(encoding="utf-8").split("\n"))
+                    if line_count > 600:
+                        warnings.append(f"File {file_path} exceeds 600 lines ({line_count})")
+            
+            # Check number of new modules
+            new_modules = [f for f in changed_files if f.endswith("__init__.py") or "/" in f]
+            if len(new_modules) > 5:
+                warnings.append(f"More than 5 new modules added in this commit ({len(new_modules)})")
+    except Exception:
+        # Git not available or other error - skip complexity check
+        pass
+    
+    return warnings
