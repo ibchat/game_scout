@@ -242,6 +242,26 @@ bash scripts/gs-dev.sh --autofix
 bash scripts/verify_autopilot.sh
 ```
 
+**Automatic mode (Self-Trigger):**
+
+Autopilot can run automatically in two ways:
+
+1. **Git hook (post-commit):**
+   - Automatically runs after commits containing `[autopilot]` or changes to `apps/`, `dev_supervisor/`, `migrations/`
+   - Logs to `logs/autopilot.log`
+   - Auto-reverts commits with `[autopilot]` tag if supervisor fails
+   - Skip hook: add `[skip-autopilot]` to commit message
+
+2. **File watcher daemon:**
+   ```bash
+   bash scripts/autopilot_daemon.sh
+   ```
+   - Monitors file changes in `apps/`, `dev_supervisor/`, `migrations/`
+   - Auto-rebuilds and runs supervisor on changes
+   - Requires `fswatch` (install: `brew install fswatch`)
+   - Status: `logs/autopilot_status.json`
+   - Logs: `logs/autopilot_daemon.log`
+
 This command:
 1. Ensures Docker services are running
 2. Waits for API readiness (up to 60 seconds)
