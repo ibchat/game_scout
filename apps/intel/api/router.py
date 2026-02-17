@@ -27,10 +27,27 @@ def check_intel_enabled():
 @router.get("/health")
 async def intel_health() -> Dict[str, Any]:
     """Health check for Intel module."""
+    from apps.intel.policy.policy_engine import load_policy, get_policy_hash
+    
+    policy_loaded = False
+    policy_version = None
+    policy_hash = None
+    
+    try:
+        policy = load_policy()
+        policy_loaded = policy is not None
+        policy_version = policy.get("version", "unknown") if policy else None
+        policy_hash = get_policy_hash()
+    except Exception as e:
+        logger.warning(f"Failed to load policy for health check: {e}")
+    
     return {
         "status": "ok" if is_intel_enabled() else "disabled",
         "module": "intel",
-        "enabled": is_intel_enabled()
+        "enabled": is_intel_enabled(),
+        "policy_loaded": policy_loaded,
+        "policy_version": policy_version,
+        "policy_hash": policy_hash
     }
 
 
