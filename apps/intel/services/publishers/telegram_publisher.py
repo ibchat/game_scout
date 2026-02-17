@@ -254,6 +254,39 @@ class TelegramPublisher:
             status="published" if success else "failed"
         )
     
+    def _try_get_chat_id_from_updates(self) -> Optional[str]:
+        """Try to get chat_id from recent bot updates (helper for finding channel ID)"""
+        if not self.bot_token or not self.base_url:
+            return None
+        
+        try:
+            url = f"{self.base_url}/getUpdates"
+            with httpx.Client(timeout=5.0) as client:
+                response = client.get(url, params={"limit": 10})
+                response.raise_for_status()
+                result = response.json()
+                
+                if result.get("ok"):
+                    updates = result.get("result", [])
+                    for update in updates:
+                        # Check channel posts
+                        if "channel_post" in update:
+                            chat = update["channel_post"].get("chat", {})
+                            chat_id = chat.get("id")
+                            if chat_id:
+                                return str(chat_id)
+                        # Check forwarded messages
+                        if "message" in update:
+                            chat = update["message"].get("chat", {})
+                            if chat.get("type") == "channel":
+                                chat_id = chat.get("id")
+                                if chat_id:
+                                    return str(chat_id)
+        except Exception:
+            pass
+        
+        return None
+    
     def check_telegram_access(self) -> Tuple[bool, str, dict]:
         """
         Check Telegram bot and channel access without sending messages.
@@ -264,8 +297,17 @@ class TelegramPublisher:
             - error: Error message if failed
             - details: Dict with bot info, chat info (without exposing token)
         """
-        if not self.bot_token or not self.chat_id:
-            return False, "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not configured", {}
+        if not self.bot_token:
+            return False, "TELEGRAM_BOT_TOKEN not configured", {}
+        
+        # Try to auto-detect chat_id from updates if not set
+        if not self.chat_id:
+            auto_chat_id = self._try_get_chat_id_from_updates()
+            if auto_chat_id:
+                self.chat_id = auto_chat_id
+                logger.info(f"Auto-detected TELEGRAM_CHAT_ID from updates: {auto_chat_id}")
+            else:
+                return False, "TELEGRAM_CHAT_ID not configured and could not be auto-detected. Add bot to channel and forward a message, or set TELEGRAM_CHAT_ID manually.", {}
         
         if not self.base_url:
             return False, "Telegram base_url not configured", {}
