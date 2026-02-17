@@ -72,8 +72,16 @@ def run_contract_tests() -> SupervisorResult:
             
             output = result.stdout + result.stderr
             
+            # Check for skipped tests (not allowed in strict mode)
+            skipped_count = output.count('SKIPPED')
+            if skipped_count > 0:
+                errors.append(f"pytest skipped {skipped_count} test(s) - this is not allowed")
+            
             if result.returncode == 0:
-                status = StageStatus.OK
+                if skipped_count > 0:
+                    status = StageStatus.FAIL
+                else:
+                    status = StageStatus.OK
             else:
                 status = StageStatus.FAIL
                 # Extract failed tests
@@ -170,8 +178,16 @@ def run_contract_tests() -> SupervisorResult:
             
             output = result.stdout + result.stderr
             
+            # Check for skipped tests (not allowed in strict mode)
+            skipped_count = output.count('SKIPPED')
+            if skipped_count > 0:
+                errors.append(f"pytest skipped {skipped_count} test(s) - this is not allowed")
+            
             if result.returncode == 0:
-                status = StageStatus.OK
+                if skipped_count > 0:
+                    status = StageStatus.FAIL
+                else:
+                    status = StageStatus.OK
             else:
                 status = StageStatus.FAIL
                 # Extract failed tests
