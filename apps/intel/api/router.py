@@ -229,6 +229,60 @@ async def run_pipeline(
         raise HTTPException(status_code=500, detail=f"Pipeline failed: {str(e)}")
 
 
+@router.get("/pipeline/status")
+async def pipeline_status(
+    db: Session = Depends(get_db_session),
+    _: None = Depends(check_intel_enabled),
+) -> Dict[str, Any]:
+    """
+    Get pipeline status and statistics.
+    
+    Returns:
+    {
+      "total_raw_items": int,
+      "total_events": int,
+      "total_published": int,
+      "total_skipped": int,
+      "last_publish_time": str (ISO format) or null,
+      "last_error": str or null
+    }
+    """
+    from apps.intel.db.models import IntelRawItem, IntelEvent, IntelPublishLog
+    
+    total_raw_items = db.query(IntelRawItem).count()
+    total_events = db.query(IntelEvent).count()
+    total_published = db.query(IntelPublishLog).filter(
+        IntelPublishLog.status == "published"
+    ).count()
+    total_skipped = db.query(IntelPublishLog).filter(
+        IntelPublishLog.status == "skipped"
+    ).count()
+    
+    # Get last publish time
+    last_publish = db.query(IntelPublishLog).filter(
+        IntelPublishLog.status == "published"
+    ).order_by(IntelPublishLog.published_at.desc()).first()
+    
+    last_publish_time = last_publish.published_at.isoformat() if last_publish else None
+    
+    # Get last error
+    last_error_log = db.query(IntelPublishLog).filter(
+        IntelPublishLog.status == "failed"
+    ).order_by(IntelPublishLog.published_at.desc()).first()
+    
+    last_error = last_error_log.error if last_error_log else None
+    
+    return {
+        "status": "ok",
+        "total_raw_items": total_raw_items,
+        "total_events": total_events,
+        "total_published": total_published,
+        "total_skipped": total_skipped,
+        "last_publish_time": last_publish_time,
+        "last_error": last_error
+    }
+
+
 @router.post("/telegram/test")
 async def test_telegram(
     body: Dict[str, Any] = Body(...),

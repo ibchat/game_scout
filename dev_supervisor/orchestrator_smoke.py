@@ -128,6 +128,10 @@ def run_orchestrator_smoke() -> SupervisorResult:
                 errors.append("Intel health endpoint returned not OK (expected enabled=true, status=200)")
             if not health_result["policy_loaded"]:
                 errors.append("Intel health endpoint reports policy not loaded")
+            if not health_result.get("db_ok", False):
+                errors.append("Intel health endpoint reports db_ok=false")
+            if not health_result.get("telegram_ok", False):
+                warnings.append("Intel health endpoint reports telegram_ok=false (Telegram may not be configured)")
     else:
         # On host: skip health check (API might not be exposed to host)
         warnings.append("Health check skipped (running on host, API may not be exposed)")

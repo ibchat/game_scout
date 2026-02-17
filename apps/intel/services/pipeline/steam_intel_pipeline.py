@@ -303,15 +303,18 @@ def run_pipeline(
         try:
             # Skip if not eligible
             if not event.autopublish_eligible:
-                # Create publish log with skipped status
+                # Create publish log with skipped status and detailed info
                 from apps.intel.db.models import IntelPublishLog
-                skip_reason = "below_threshold"
+                skip_reason = "not_eligible"
                 if event.significance_score < min_score:
-                    skip_reason = "below_threshold"
+                    skip_reason = f"below_threshold (score={event.significance_score}, min={min_score})"
                 elif event.event_type in never_autopublish:
-                    skip_reason = "blocked_category"
-                else:
-                    skip_reason = "not_eligible"
+                    skip_reason = f"blocked_category ({event.event_type})"
+                elif event.significance_reason:
+                    skip_reason = f"not_eligible: {event.significance_reason}"
+                
+                # Log skip reason
+                logger.info(f"Event {event.id} skipped: {skip_reason} (score={event.significance_score}, type={event.event_type})")
                 
                 # Check if already logged
                 existing_log = db.query(IntelPublishLog).filter(
@@ -325,7 +328,14 @@ def run_pipeline(
                         channel_id="free",
                         telegram_message_id="",
                         status="skipped",
-                        error=skip_reason
+                        error=skip_reason,
+                        payload={
+                            "significance_score": event.significance_score,
+                            "significance_reason": event.significance_reason,
+                            "event_type": event.event_type,
+                            "eligibility_decision": "rejected",
+                            "skip_reason": skip_reason
+                        }
                     )
                     db.add(publish_log)
                     db.commit()

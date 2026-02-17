@@ -16,7 +16,7 @@ INTEL_ENABLED = _intel_enabled_cleaned == "true"
 
 # Debug log the parsed value
 logger.info(f"Intel config: INTEL_ENABLED raw='{_intel_enabled_raw}', cleaned='{_intel_enabled_cleaned}', parsed={INTEL_ENABLED}")
-INTEL_DRY_RUN = os.getenv("INTEL_DRY_RUN", "true").lower() == "true"
+INTEL_DRY_RUN = os.getenv("INTEL_DRY_RUN", "false").lower() == "true"
 INTEL_AUTO_PUBLISH = os.getenv("INTEL_AUTO_PUBLISH", "false").lower() == "true"
 INTEL_AUTO_PUBLISH_SAFE_ONLY = os.getenv("INTEL_AUTO_PUBLISH_SAFE_ONLY", "true").lower() == "true"
 

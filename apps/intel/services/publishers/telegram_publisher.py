@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass
 
 import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from apps.intel.db.models import IntelEvent, IntelPublishLog
 from apps.intel.policy.policy_engine import load_policy
@@ -163,7 +164,14 @@ class TelegramPublisher:
             logger.info(f"[DRY RUN] Would send to Telegram chat {chat_id}: {message[:100]}...")
             return True, "dry_run_message_id", None
         
-        try:
+        # Retry logic: 3 attempts with exponential backoff (1s, 2s, 4s)
+        @retry(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=1, max=4),
+            retry=retry_if_exception_type((httpx.HTTPError, httpx.TimeoutException)),
+            reraise=True
+        )
+        def _send_with_retry():
             url = f"{self.base_url}/sendMessage"
             payload = {
                 "chat_id": chat_id,
@@ -178,14 +186,22 @@ class TelegramPublisher:
                 result = response.json()
                 if result.get("ok"):
                     message_id = str(result["result"]["message_id"])
+                    logger.info(f"Telegram message sent successfully: message_id={message_id}, chat_id={chat_id}")
                     return True, message_id, None
                 else:
                     error = result.get("description", "Unknown Telegram API error")
+                    logger.error(f"Telegram API error: {error}")
                     return False, None, error
-                    
+        
+        try:
+            return _send_with_retry()
         except Exception as e:
-            logger.error(f"Failed to send Telegram message: {e}", exc_info=True)
-            return False, None, str(e)
+            error_msg = str(e)
+            # Never log token
+            if self.bot_token:
+                error_msg = error_msg.replace(self.bot_token, "***TOKEN***")
+            logger.error(f"Failed to send Telegram message after retries: {error_msg}", exc_info=True)
+            return False, None, error_msg
     
     def publish_event(
         self, 
@@ -234,12 +250,20 @@ class TelegramPublisher:
         # Send to Telegram
         success, message_id, error = self._send_to_telegram(message)
         
-        # Save to publish log
+        # Save to publish log with significance info
+        payload = {
+            "message": message[:500],  # Store first 500 chars
+            "significance_score": event.significance_score if hasattr(event, 'significance_score') else 0,
+            "significance_reason": event.significance_reason if hasattr(event, 'significance_reason') else None,
+            "event_type": event.event_type,
+            "eligibility_decision": "accepted" if success else "rejected"
+        }
+        
         publish_log = IntelPublishLog(
             event_id=event.id,
             channel_id="free",  # Single channel
             telegram_message_id=message_id or "",
-            payload={"message": message[:500]},  # Store first 500 chars
+            payload=payload,
             status="published" if success else "failed",
             error=error
         )
@@ -251,6 +275,8 @@ class TelegramPublisher:
             event.publish_channel = "free"
             event.published_at = datetime.utcnow()
             event.telegram_message_id = message_id
+            score = event.significance_score if hasattr(event, 'significance_score') else 0
+            logger.info(f"Event {event.id} published to Telegram: message_id={message_id}, score={score}, type={event.event_type}")
         
         self.db.commit()
         
