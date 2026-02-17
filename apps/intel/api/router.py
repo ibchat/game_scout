@@ -235,6 +235,8 @@ async def test_telegram(
     db: Session = Depends(get_db_session),
     _: None = Depends(check_intel_enabled),
 ) -> Dict[str, Any]:
+    """Test Telegram publishing with a custom message"""
+    from apps.intel.db.models import IntelEvent
     """
     Test Telegram bot and channel access.
     
