@@ -54,21 +54,38 @@ API_READY=false
 
 while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
     # Check if API is ready using Python inside container (no curl needed)
-    if docker compose exec -T api python -c "
+    # Use /api/v1/health endpoint (standard health endpoint)
+    if docker compose exec -T api python <<'PYTHON_EOF' 2>/dev/null
 import sys
 try:
     import httpx
-    response = httpx.get('http://localhost:8000/api/v1/health', timeout=2)
-    sys.exit(0 if response.status_code == 200 else 1)
-except:
+    # Try standard health endpoint first
+    try:
+        response = httpx.get('http://localhost:8000/api/v1/health', timeout=2)
+        if response.status_code == 200:
+            sys.exit(0)
+    except:
+        pass
+    # Fallback: try root endpoint
+    try:
+        response = httpx.get('http://localhost:8000/', timeout=2)
+        if response.status_code in [200, 404]:  # 404 is OK, means API is running
+            sys.exit(0)
+    except:
+        pass
     sys.exit(1)
-" 2>/dev/null; then
+except Exception as e:
+    sys.exit(1)
+PYTHON_EOF
+    then
         API_READY=true
         break
     fi
     
     ATTEMPT=$((ATTEMPT + 1))
-    sleep 2
+    if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+        sleep 2
+    fi
 done
 
 if [ "$API_READY" = false ]; then

@@ -368,8 +368,9 @@ class FixHealthEndpoint(BaseAutofix):
     """Fix missing /intel/health endpoint (ensure router is included)"""
     
     def can_fix(self, error_message: str) -> bool:
-        return "404" in error_message and ("intel/health" in error_message or "/health" in error_message) or \
-               "Intel health endpoint not reachable" in error_message
+        return ("404" in error_message and "intel/health" in error_message.lower()) or \
+               "Intel router is not included" in error_message or \
+               "Intel health endpoint returned 404" in error_message
     
     def apply(self) -> AutofixResult:
         main_py = self.project_root / "apps" / "api" / "main.py"
@@ -384,31 +385,80 @@ class FixHealthEndpoint(BaseAutofix):
         content = main_py.read_text(encoding="utf-8")
         
         # Check if Intel router already included
-        if "intel_router" in content and "include_router" in content:
-            # Check if it's actually included
-            if "app.include_router(intel_router" in content:
-                return AutofixResult(
-                    "FixHealthEndpoint",
-                    False,
-                    "Intel router already included in main.py"
-                )
+        if "app.include_router(intel_router" in content or "app.include_router(intel_router.router" in content:
+            return AutofixResult(
+                "FixHealthEndpoint",
+                False,
+                "Intel router already included in main.py"
+            )
         
-        # Add Intel router inclusion (if not present)
-        # Look for other router inclusions and add Intel after them
-        if "intel_router" not in content:
-            # Add import
-            import_pattern = r"(from apps\.api\.routers import[^\n]*)"
-            if re.search(import_pattern, content):
-                # Add to existing import or add new import
-                content = content.replace(
-                    "# Intel module",
-                    "# Intel module\ntry:\n    from apps.intel.api import router as intel_router\n    app.include_router(intel_router.router, prefix=API_V1)\nexcept Exception as e:\n    logger.warning(f\"Intel router not available: {e}\")"
-                )
+        # Find where to add Intel router (after other routers, before CMD)
+        # Look for pattern: app.include_router(...)
+        lines = content.split("\n")
+        insert_index = -1
+        
+        # Find last router inclusion
+        for i, line in enumerate(lines):
+            if "app.include_router" in line and "intel" not in line.lower():
+                insert_index = i + 1
+        
+        # If not found, look for "# Intel module" comment
+        if insert_index == -1:
+            for i, line in enumerate(lines):
+                if "# Intel module" in line or "# VOY module" in line:
+                    insert_index = i
+                    break
+        
+        # If still not found, add before CMD or at end
+        if insert_index == -1:
+            for i, line in enumerate(lines):
+                if 'CMD [' in line or 'command:' in line.lower():
+                    insert_index = i
+                    break
+            if insert_index == -1:
+                insert_index = len(lines)
+        
+        # Check if import exists
+        has_import = "from apps.intel.api import router as intel_router" in content
+        
+        # Add import if needed
+        if not has_import:
+            # Find import section
+            import_section_end = 0
+            for i, line in enumerate(lines):
+                if line.startswith("from apps.api.routers import") or line.startswith("from apps.intel"):
+                    import_section_end = i + 1
+                elif import_section_end > 0 and line.strip() and not line.startswith("#") and not line.startswith("from") and not line.startswith("import"):
+                    break
+            
+            if import_section_end > 0:
+                lines.insert(import_section_end, "from apps.intel.api import router as intel_router")
             else:
-                # Add at end before CMD
-                content += "\n# Intel module\ntry:\n    from apps.intel.api import router as intel_router\n    app.include_router(intel_router.router, prefix=API_V1)\nexcept Exception as e:\n    logger.warning(f\"Intel router not available: {e}\")\n"
+                # Fallback: add after other imports
+                for i, line in enumerate(lines):
+                    if "from apps.api.routers import" in line:
+                        lines.insert(i + 1, "from apps.intel.api import router as intel_router")
+                        break
         
-        main_py.write_text(content, encoding="utf-8")
+        # Add router inclusion
+        router_code = [
+            "# Intel module - always try to include (guarded by feature flag)",
+            "try:",
+            "    from apps.intel.api import router as intel_router",
+            "    app.include_router(intel_router.router, prefix=API_V1)",
+            "    logger.info(\"✅ Intel router included successfully\")",
+            "except (ImportError, ModuleNotFoundError) as e:",
+            "    logger.warning(f\"⚠️ Intel module not available: {e}\")",
+            "except Exception as e:",
+            "    logger.error(f\"❌ Error including Intel router: {e}\", exc_info=True)"
+        ]
+        
+        # Insert router code
+        for i, code_line in enumerate(router_code):
+            lines.insert(insert_index + i, code_line)
+        
+        new_content = "\n".join(lines)
+        main_py.write_text(new_content, encoding="utf-8")
         
         # Commit the fix
         self._run_git_command(["add", "apps/api/main.py"])
@@ -420,7 +470,7 @@ class FixHealthEndpoint(BaseAutofix):
         return AutofixResult(
             "FixHealthEndpoint",
             True,
-            "Ensured Intel router is included",
+            "Added Intel router inclusion to main.py",
             ["apps/api/main.py"]
         )
 

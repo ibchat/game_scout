@@ -218,13 +218,13 @@ See `.cursor/rules/guardrails.md` and `SPECS/WORKFLOW.md` for full workflow rule
 
 ---
 
-## Dev Orchestrator (Autopilot C)
+## Dev Orchestrator (Autopilot C+)
 
-Single-command development orchestrator that runs all checks and validations.
+Single-command development orchestrator that runs all checks and validations, with optional automatic fixes.
 
 ### Quick Start
 
-Run all checks with one command:
+**One-button mode (recommended):**
 
 ```bash
 ./scripts/gs-dev.sh
@@ -232,26 +232,78 @@ Run all checks with one command:
 
 This command:
 1. Ensures Docker services are running
-2. Runs guardrails
-3. Validates migration chain
-4. Runs alembic upgrade head
-5. Validates Intel contracts
-6. Runs contract tests (pytest)
-7. Runs orchestrator smoke test (RSS collection)
-8. Returns exit code 0 if all checks pass
+2. Waits for API readiness (up to 60 seconds)
+3. Runs dev_supervisor with all checks:
+   - Guardrails (file deletions, migration changes, Python syntax)
+   - Migration chain validation
+   - Alembic upgrade head
+   - Intel contract validation
+   - Contract tests (pytest)
+   - Orchestrator smoke test (RSS collection to intel_raw_items)
+4. Returns exit code 0 if all checks pass (STABLE)
 
-### What It Checks
+**With automatic fixes:**
+
+```bash
+./scripts/gs-dev.sh --autofix
+```
+
+This mode:
+- Runs all checks as above
+- If any check fails, attempts to apply safe automatic fixes
+- Retries checks after fixes (max 2 iterations)
+- Commits fixes automatically with "autofix: ..." messages
+- Returns exit code 0 if checks pass after fixes
+
+### What Gets Checked
 
 - **Guardrails**: File deletions, migration changes, Python syntax
 - **Migration Chain**: Alembic chain validity, upgrade head
 - **Contract Validation**: Intel module contracts, policy engine
 - **Contract Tests**: pytest tests_contract/
-- **Smoke Test**: Actual RSS collection to intel_raw_items
+- **Smoke Test**: Actual RSS collection to intel_raw_items (verifies DB writes)
+
+### Automatic Fixes (Whitelist)
+
+When `--autofix` is enabled, the system can automatically fix:
+
+1. **Missing import subprocess** in orchestrator_smoke.py
+2. **Missing git** in Dockerfiles (for guardrail.sh)
+3. **Missing pytest** in pyproject.toml
+4. **Missing smoke script** (creates scripts/intel_smoke_collect_rss.py)
+5. **Missing Intel router** in apps/api/main.py (if health endpoint 404)
+
+All fixes are:
+- **Idempotent**: Safe to apply multiple times
+- **Committed**: Each fix creates a git commit
+- **Safe**: Never deletes files or modifies migrations
 
 ### Exit Codes
 
 - `0`: All checks passed (STABLE)
 - `1`: One or more checks failed (FAILED)
+- `2`: Script run inside container (must run on host)
+
+### Troubleshooting
+
+**If checks fail:**
+
+1. Check the supervisor report output (printed at the end)
+2. Look for specific error messages in the report
+3. Try running with `--autofix` to attempt automatic fixes
+4. Check Docker logs: `docker compose logs api`
+
+**If health endpoint returns 404:**
+
+- Verify Intel router is included in `apps/api/main.py`
+- Check that `INTEL_ENABLED=true` in `.env` (if required)
+- Run with `--autofix` to automatically add router inclusion
+
+**If smoke test fails:**
+
+- Verify database is accessible: `docker compose exec -T api python -c "from apps.db.session import SessionLocal; db = SessionLocal(); print('DB OK')"`
+- Check IntelSource exists: `docker compose exec -T api python scripts/intel_smoke_collect_rss.py`
+- Verify network access (RSS feed must be reachable)
 
 ### Running Individual Checks
 
@@ -269,6 +321,9 @@ docker compose exec -T api python -m pytest tests_contract/ -v
 
 # Run supervisor manually
 docker compose exec -T api python dev_supervisor/run.py
+
+# Run supervisor with autofix
+docker compose exec -T api python dev_supervisor/run.py --autofix
 ```
 
 **API mode** (if you have TikTok API access):

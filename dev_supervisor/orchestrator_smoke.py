@@ -107,23 +107,30 @@ def run_orchestrator_smoke() -> SupervisorResult:
         errors.append(f"Policy engine load failed: {str(e)}")
     
     # Check 5: Intel health endpoint (if API is running)
-    # This check is optional - only if we can reach the API
-    # Use correct endpoint path: /api/v1/intel/health (not /intel/health)
+    # This check is critical - if 404, it means router is not included
     if _is_inside_container():
         # Inside container: use localhost
         health_result = check_intel_health("http://localhost:8000")
+        
+        # If 404, this is a critical error - router not included
+        if health_result.get("error") and "404" in str(health_result.get("error")):
+            errors.append(
+                "Intel health endpoint returned 404. "
+                "This means Intel router is not included in apps/api/main.py. "
+                "Check that 'from apps.intel.api import router as intel_router' "
+                "and 'app.include_router(intel_router.router, prefix=API_V1)' are present."
+            )
+        elif health_result["error"]:
+            # Other errors (timeout, connection) are warnings if API might not be ready
+            warnings.append(f"Intel health endpoint not reachable: {health_result['error']}")
+        else:
+            if not health_result["ok"]:
+                warnings.append("Intel health endpoint returned not OK")
+            if not health_result["policy_loaded"]:
+                warnings.append("Intel health endpoint reports policy not loaded")
     else:
-        # On host: try localhost (may not work if API not exposed)
-        health_result = check_intel_health("http://localhost:8000")
-    
-    if health_result["error"]:
-        # API not running is a warning, not error
-        warnings.append(f"Intel health endpoint not reachable: {health_result['error']}")
-    else:
-        if not health_result["ok"]:
-            warnings.append("Intel health endpoint returned not OK")
-        if not health_result["policy_loaded"]:
-            warnings.append("Intel health endpoint reports policy not loaded")
+        # On host: skip health check (API might not be exposed to host)
+        warnings.append("Health check skipped (running on host, API may not be exposed)")
     
     # Check 6: Run actual RSS collection smoke test
     smoke_script = Path("scripts/intel_smoke_collect_rss.py")
