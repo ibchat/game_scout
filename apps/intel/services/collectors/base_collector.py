@@ -20,7 +20,14 @@ logger = logging.getLogger(__name__)
 class BaseIntelCollector:
     """Base class for Intel collectors with common functionality."""
     
-    def __init__(self):
+    def __init__(self, db: Session):
+        """
+        Initialize collector with database session.
+        
+        Args:
+            db: SQLAlchemy database session
+        """
+        self.db = db
         self.http_client = http_client
     
     def validate_url(self, url: str) -> tuple[bool, str]:
@@ -93,8 +100,29 @@ class BaseIntelCollector:
     
     def collect(self, db: Session, source: IntelSource) -> Dict[str, int]:
         """
-        Collect items from source.
+        Collect items from source (legacy method, kept for backward compatibility).
         Must be implemented by subclasses.
         Returns: {collected: int, saved: int, errors: int}
         """
         raise NotImplementedError("Subclasses must implement collect()")
+    
+    def collect_source(self, source: IntelSource) -> int:
+        """
+        Collect items from source and save to database.
+        Unified interface for all collectors.
+        
+        Args:
+            source: IntelSource to collect from
+            
+        Returns:
+            Number of new items saved (0 if all duplicates or errors)
+        """
+        # Validate source URL through policy
+        decision, reason = validate_source_url(source.url)
+        if decision != "allow":
+            logger.warning(f"Source URL rejected by policy: {source.url} - {reason}")
+            return 0
+        
+        # Use legacy collect method and return saved count
+        result = self.collect(self.db, source)
+        return result.get("saved", 0)
