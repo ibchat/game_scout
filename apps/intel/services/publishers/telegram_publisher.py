@@ -258,6 +258,16 @@ class TelegramPublisher:
         # Format message
         message = self._format_message(event, brief)
         
+        # Strict Russian language check
+        from apps.intel.services.translator import message_is_russian
+        if not message_is_russian(message):
+            logger.error(f"Event {event.id} message is not in Russian! Blocking publication.")
+            return PublishResult(
+                success=False,
+                status="failed",
+                error="Message is not in Russian (strict_russian_output policy violation)"
+            )
+        
         # Send to Telegram
         success, message_id, error = self._send_to_telegram(message)
         

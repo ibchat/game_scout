@@ -14,6 +14,8 @@ from apps.intel.services.collectors import RSSCollector, SteamNewsCollector
 from apps.intel.services.business_brief_generator import generate_business_brief, classify_signal_type
 from apps.intel.services.publishers.telegram_publisher import TelegramPublisher
 from apps.intel.services.significance import score_event
+from apps.intel.services.steam_mention_detector import detect_steam_relevance, extract_steam_appid
+from apps.intel.services.translator import translate_to_ru, message_is_russian, detect_language
 from apps.intel.policy.policy_engine import load_policy, validate_source_url
 
 logger = logging.getLogger(__name__)
@@ -95,17 +97,18 @@ def create_or_update_event(
         text = extracted_item.text or extracted_item.title_norm or ""
         signal_type = classify_signal_type(text)
         
-        # Translate title if needed
-        from apps.intel.services.business_brief_generator import translate_to_russian, detect_language
+        # Translate title if needed (strict Russian output)
         title_ru = extracted_item.title_norm
-        if detect_language(title_ru) != "ru":
-            title_ru = translate_to_russian(title_ru)
+        source_lang = extracted_item.lang or detect_language(title_ru)
+        if source_lang != "ru":
+            logger.info(f"Translating title from {source_lang} to ru")
+            title_ru = translate_to_ru(title_ru, source_lang)
         
         what_happened_ru = extracted_item.text or "нет данных"
-        if detect_language(what_happened_ru) != "ru":
-            what_happened_ru = translate_to_russian(what_happened_ru)
+        if source_lang != "ru":
+            what_happened_ru = translate_to_ru(what_happened_ru, source_lang)
         
-        # Create event
+        # Create event (all content must be in Russian)
         event = IntelEvent(
             cluster_id=cluster.id,
             event_type=signal_type,
@@ -115,7 +118,12 @@ def create_or_update_event(
             what_happened_ru=what_happened_ru,
             why_it_matters_ru=None,  # Will be filled by brief generator
             sources=[extracted_item.url_norm] if extracted_item.url_norm else [],
-            autopublish_eligible=False  # Will be calculated after scoring
+            autopublish_eligible=False,  # Will be calculated after scoring
+            llm_meta={
+                "translation_applied": source_lang != "ru",
+                "source_language": source_lang,
+                "final_language": "ru"
+            }
         )
         
         db.add(event)

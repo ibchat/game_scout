@@ -108,6 +108,10 @@ def _calculate_score_by_category(
             score = 65
         elif "full release" in text_lower or "полный релиз" in text_lower:
             score = 80
+        # +15 boost for AAA releases
+        aaa_indicators = ["aaa", "triple-a", "blockbuster", "major studio"]
+        if any(indicator in text_lower for indicator in aaa_indicators):
+            score = min(100, score + 15)
         return score, "Релиз игры", 0.85
     
     # funding: 70-95
@@ -121,11 +125,18 @@ def _calculate_score_by_category(
                 score = 90
             elif amount >= 5:
                 score = 85
+            # +15 boost for > 1M
+            if amount >= 1:
+                score = min(100, score + 15)
         return score, "Финансирование проекта", 0.9
     
     # publisher_deal: 60-90
     if category == "publisher_deal":
         score = 75  # Base score
+        # +15 boost for known publishers
+        known_publishers = ["ea", "ubisoft", "activision", "take-two", "warner", "sony", "microsoft", "nintendo"]
+        if any(pub in text_lower for pub in known_publishers):
+            score = min(100, score + 15)
         return score, "Издательская сделка", 0.85
     
     # market_trend: 55-85
@@ -147,6 +158,8 @@ def _calculate_score_by_category(
                 score = 65
             elif discount_pct >= 50:
                 score = 55
+                # +10 boost for 50%+ discount
+                score = min(100, score + 10)
             elif discount_pct >= 25:
                 score = 45
             else:
@@ -163,9 +176,10 @@ def _calculate_score_by_category(
             score = 55
         return score, "Крупное обновление", 0.7
     
-    # routine patch: 5-25
-    if category == "patch" or ("patch" in text_lower and "major" not in text_lower):
+    # routine patch: 5-25 (max 20)
+    if category == "patch" or ("patch" in text_lower and "major" not in text_lower and "overhaul" not in text_lower):
         score = 15  # Base score for routine patches
+        score = min(20, score)  # Cap at 20 for routine patches
         return score, "Обычное обновление", 0.6
     
     # controversy: 60-90 (but may need review)

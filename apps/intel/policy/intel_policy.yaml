@@ -32,6 +32,10 @@ hard_rules:
     - key_facts
   if_missing_data_write: "нет данных"
   output_language: ru
+  strict_russian_output: true  # All Telegram messages must be in Russian
+
+# Steam relevance filtering
+steam_relevance_required: true  # Only process items relevant to Steam
 
 # Telegram template configuration
 telegram_template:
