@@ -58,7 +58,8 @@ echo "4. Checking inside api container..."
 
 # Check git
 if docker compose exec -T api git --version &> /dev/null 2>&1; then
-    echo "   ✅ git available"
+    GIT_VERSION=$(docker compose exec -T api git --version 2>&1)
+    echo "   ✅ git found in container: $GIT_VERSION"
 else
     echo "   ❌ git not found in container"
     ERRORS=$((ERRORS + 1))
@@ -85,40 +86,69 @@ for module in pytest feedparser yaml httpx; do
 done
 echo ""
 
-# 5) Intel health endpoint
+# 5) Intel health endpoint (check both paths, no temp files)
 echo "5. Checking Intel health endpoint..."
-HEALTH_CHECK_SCRIPT=$(mktemp)
-cat > "$HEALTH_CHECK_SCRIPT" <<'PYTHON_SCRIPT'
+INTEL_HEALTH_OK=false
+INTEL_HEALTH_ERROR=""
+
+# Try /api/v1/intel/health first
+HEALTH_OUTPUT=$(docker compose exec -T api python -c "
 import sys
 import httpx
 
 try:
-    response = httpx.get('http://localhost:8000/api/v1/intel/health', timeout=5)
-    if response.status_code == 200:
-        print("OK")
-        sys.exit(0)
-    elif response.status_code == 404:
-        print("404 - Intel router not mounted")
-        sys.exit(1)
-    else:
-        print(f"HTTP {response.status_code}")
-        sys.exit(1)
+    # Try /api/v1/intel/health first
+    try:
+        response = httpx.get('http://localhost:8000/api/v1/intel/health', timeout=5)
+        if response.status_code == 200:
+            print('OK:/api/v1/intel/health')
+            sys.exit(0)
+        elif response.status_code == 404:
+            # Try /intel/health as fallback
+            try:
+                response2 = httpx.get('http://localhost:8000/intel/health', timeout=5)
+                if response2.status_code == 200:
+                    print('OK:/intel/health')
+                    sys.exit(0)
+                else:
+                    print(f'FAIL: Both paths returned non-200. /api/v1/intel/health={response.status_code}, /intel/health={response2.status_code}')
+                    sys.exit(1)
+            except Exception as e2:
+                print(f'FAIL: /api/v1/intel/health=404, /intel/health error: {e2}')
+                sys.exit(1)
+        else:
+            print(f'FAIL: /api/v1/intel/health returned HTTP {response.status_code}')
+            sys.exit(1)
+    except Exception as e:
+        # Try /intel/health as fallback
+        try:
+            response2 = httpx.get('http://localhost:8000/intel/health', timeout=5)
+            if response2.status_code == 200:
+                print('OK:/intel/health')
+                sys.exit(0)
+            else:
+                print(f'FAIL: /intel/health returned HTTP {response2.status_code}, first attempt error: {e}')
+                sys.exit(1)
+        except Exception as e2:
+            print(f'FAIL: Both attempts failed. First: {e}, Second: {e2}')
+            sys.exit(1)
 except Exception as e:
-    print(f"Error: {e}")
+    print(f'FAIL: Unexpected error: {e}')
     sys.exit(1)
-PYTHON_SCRIPT
+" 2>&1) || INTEL_HEALTH_ERROR="$HEALTH_OUTPUT"
 
-if docker compose exec -T api python "$HEALTH_CHECK_SCRIPT" 2>&1 | grep -q "OK"; then
-    echo "   ✅ Intel health endpoint accessible (200)"
-elif docker compose exec -T api python "$HEALTH_CHECK_SCRIPT" 2>&1 | grep -q "404"; then
+if echo "$HEALTH_OUTPUT" | grep -q "OK:"; then
+    ENDPOINT_PATH=$(echo "$HEALTH_OUTPUT" | grep "OK:" | cut -d: -f2)
+    echo "   ✅ Intel health endpoint accessible (200) at $ENDPOINT_PATH"
+    INTEL_HEALTH_OK=true
+elif echo "$HEALTH_OUTPUT" | grep -q "404"; then
     echo "   ❌ Intel health endpoint returned 404 (router not mounted)"
+    echo "      Tried: /api/v1/intel/health and /intel/health"
     ERRORS=$((ERRORS + 1))
 else
-    HEALTH_OUTPUT=$(docker compose exec -T api python "$HEALTH_CHECK_SCRIPT" 2>&1 || true)
-    echo "   ⚠️  Intel health endpoint issue: $HEALTH_OUTPUT"
+    echo "   ❌ Intel health endpoint issue: $INTEL_HEALTH_ERROR"
     ERRORS=$((ERRORS + 1))
 fi
-rm -f "$HEALTH_CHECK_SCRIPT"
 echo ""
 
 # 6) Check intel_raw_items count
