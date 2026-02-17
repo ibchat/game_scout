@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 from dev_supervisor.config import config
 from dev_supervisor.report import SupervisorResult, StageStatus
 from dev_supervisor.http_utils import check_intel_health
+import subprocess
 
 
 def run_orchestrator_smoke() -> SupervisorResult:
@@ -115,63 +116,57 @@ def run_orchestrator_smoke() -> SupervisorResult:
     smoke_script = Path("scripts/intel_smoke_collect_rss.py")
     if smoke_script.exists():
         try:
-            # Check if Docker is available
-            docker_check = subprocess.run(
-                ["docker", "--version"],
+            # Try to run smoke test in Docker
+            service_check = subprocess.run(
+                ["docker", "compose", "ps", config.DOCKER_SERVICE_API, "--format", "json"],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=10
             )
-            if docker_check.returncode == 0:
-                # Try to run smoke test in Docker
+            if service_check.returncode == 0:
+                # Run smoke test
                 try:
-                    service_check = subprocess.run(
-                        ["docker", "compose", "ps", config.DOCKER_SERVICE_API, "--format", "json"],
+                    smoke_result = subprocess.run(
+                        ["docker", "compose", "exec", "-T", config.DOCKER_SERVICE_API,
+                         "python", "scripts/intel_smoke_collect_rss.py"],
                         capture_output=True,
                         text=True,
-                        timeout=10
+                        timeout=120
                     )
-                    if service_check.returncode == 0:
-                        # Run smoke test
-                        smoke_result = subprocess.run(
-                            ["docker", "compose", "exec", "-T", config.DOCKER_SERVICE_API,
-                             "python", "scripts/intel_smoke_collect_rss.py"],
-                            capture_output=True,
-                            text=True,
-                            timeout=120
-                        )
-                        if smoke_result.returncode == 0:
-                            # Parse output for COLLECTED/TOTAL
-                            output = smoke_result.stdout
-                            if "COLLECTED:" in output and "TOTAL:" in output:
-                                # Extract numbers
-                                import re
-                                collected_match = re.search(r"COLLECTED:\s*(\d+)", output)
-                                total_match = re.search(r"TOTAL:\s*(\d+)", output)
-                                if collected_match and total_match:
-                                    collected = int(collected_match.group(1))
-                                    total = int(total_match.group(1))
-                                    if total > 0:
-                                        # Success
-                                        pass  # No error
-                                    else:
-                                        errors.append("Smoke test: TOTAL is 0, no items in database")
+                    if smoke_result.returncode == 0:
+                        # Parse output for COLLECTED/TOTAL
+                        output = smoke_result.stdout
+                        if "COLLECTED:" in output and "TOTAL:" in output:
+                            # Extract numbers
+                            import re
+                            collected_match = re.search(r"COLLECTED:\s*(\d+)", output)
+                            total_match = re.search(r"TOTAL:\s*(\d+)", output)
+                            if collected_match and total_match:
+                                collected = int(collected_match.group(1))
+                                total = int(total_match.group(1))
+                                if total > 0:
+                                    # Success
+                                    pass  # No error
                                 else:
-                                    warnings.append("Smoke test: Could not parse COLLECTED/TOTAL from output")
+                                    errors.append("Smoke test: TOTAL is 0, no items in database")
                             else:
-                                warnings.append("Smoke test: Output format unexpected")
+                                warnings.append("Smoke test: Could not parse COLLECTED/TOTAL from output")
                         else:
-                            errors.append(f"Smoke test failed with exit code {smoke_result.returncode}")
-                            if smoke_result.stderr:
-                                errors.append(f"Smoke test error: {smoke_result.stderr[:200]}")
+                            warnings.append("Smoke test: Output format unexpected")
+                    else:
+                        errors.append(f"Smoke test failed with exit code {smoke_result.returncode}")
+                        if smoke_result.stderr:
+                            errors.append(f"Smoke test error: {smoke_result.stderr[:200]}")
                 except subprocess.TimeoutExpired:
                     errors.append("Smoke test timed out after 120 seconds")
                 except Exception as e:
                     warnings.append(f"Could not run smoke test in Docker: {str(e)}")
             else:
-                warnings.append("Docker not available, skipping smoke test execution")
+                warnings.append("Docker service not running, skipping smoke test execution")
         except (FileNotFoundError, subprocess.TimeoutExpired):
             warnings.append("Docker not found, skipping smoke test execution")
+        except Exception as e:
+            warnings.append(f"Could not check Docker service: {str(e)}")
     else:
         warnings.append(f"Smoke script not found: {smoke_script}")
     
