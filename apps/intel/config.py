@@ -3,10 +3,19 @@ Intel Module Configuration
 Feature flags and settings for Intel subsystem.
 """
 import os
+import logging
 from typing import Optional
 
+logger = logging.getLogger(__name__)
+
 # Feature flags (all default to safe/disabled)
-INTEL_ENABLED = os.getenv("INTEL_ENABLED", "false").lower() == "true"
+# Parse INTEL_ENABLED with explicit boolean conversion
+_intel_enabled_raw = os.getenv("INTEL_ENABLED", "false")
+_intel_enabled_cleaned = _intel_enabled_raw.strip().lower() if _intel_enabled_raw else "false"
+INTEL_ENABLED = _intel_enabled_cleaned == "true"
+
+# Debug log the parsed value
+logger.info(f"Intel config: INTEL_ENABLED raw='{_intel_enabled_raw}', cleaned='{_intel_enabled_cleaned}', parsed={INTEL_ENABLED}")
 INTEL_DRY_RUN = os.getenv("INTEL_DRY_RUN", "true").lower() == "true"
 INTEL_AUTO_PUBLISH = os.getenv("INTEL_AUTO_PUBLISH", "false").lower() == "true"
 INTEL_AUTO_PUBLISH_SAFE_ONLY = os.getenv("INTEL_AUTO_PUBLISH_SAFE_ONLY", "true").lower() == "true"
