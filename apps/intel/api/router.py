@@ -154,3 +154,124 @@ async def run_pipeline_manually(
     """Manually trigger Intel pipeline task (for testing)."""
     # TODO: Implement in Commit 11
     return {"status": "ok", "message": "Pipeline task queued"}
+
+
+@router.post("/run-steam-feed")
+async def run_steam_feed(
+    limit: int = Query(20, ge=1, le=100, description="Maximum events to process"),
+    dry_run: bool = Query(False, description="Dry run mode (no actual publishing)"),
+    premium: bool = Query(False, description="Use premium channel"),
+    db: Session = Depends(get_db_session),
+    _: None = Depends(check_intel_enabled),
+) -> Dict[str, Any]:
+    """
+    Run full Steam Intelligence → Telegram Business Feed pipeline.
+    
+    Flow: collect → extract → event → brief → publish
+    
+    Args:
+        limit: Maximum events to process
+        dry_run: If True, don't actually publish
+        premium: If True, use premium channel (includes funding, publisher_deal, market_trend)
+    
+    Returns:
+        Summary of processed events
+    """
+    from apps.intel.db.models import IntelEvent, IntelRawItem, IntelExtractedItem
+    from apps.intel.services.briefing.steam_brief_generator import generate_business_brief
+    from apps.intel.services.publishers.telegram_publisher import TelegramPublisher
+    from apps.intel.policy.policy_engine import load_policy
+    from datetime import datetime
+    
+    logger.info(f"Starting Steam feed pipeline: limit={limit}, dry_run={dry_run}, premium={premium}")
+    
+    # Determine channel and event types
+    channel = "premium" if premium else "public"
+    policy = load_policy()
+    
+    if premium:
+        # Premium: all allowed types
+        allowed_types = policy.get("allowed_event_types_for_autopublish", [])
+    else:
+        # Public: only safe types (release, patch_major, discount)
+        allowed_types = ["release", "patch_major", "discount"]
+    
+    # Get events ready for publishing
+    events_query = db.query(IntelEvent).filter(
+        IntelEvent.status == "ready",
+        IntelEvent.event_type.in_(allowed_types),
+        IntelEvent.publish_status.in_([None, "draft"]),
+        IntelEvent.is_premium == premium
+    ).order_by(IntelEvent.score.desc(), IntelEvent.created_at.desc()).limit(limit)
+    
+    events = events_query.all()
+    
+    if not events:
+        return {
+            "status": "ok",
+            "message": "No events ready for publishing",
+            "processed": 0,
+            "published": 0,
+            "failed": 0
+        }
+    
+    # Process each event
+    published_count = 0
+    failed_count = 0
+    results = []
+    
+    publisher = TelegramPublisher(db)
+    
+    for event in events:
+        try:
+            # Step 1: Generate business brief if not exists
+            if not event.business_brief_json:
+                logger.info(f"Generating business brief for event {event.id}")
+                brief = generate_business_brief(event, db)
+                event.business_brief_json = brief
+                event.business_brief_generated_at = datetime.utcnow()
+                db.commit()
+            
+            # Step 2: Publish to Telegram
+            result = publisher.publish_event(event, dry_run=dry_run, channel=channel)
+            
+            if result.success:
+                published_count += 1
+                results.append({
+                    "event_id": str(event.id),
+                    "status": "published",
+                    "message_id": result.message_id,
+                    "channel": channel
+                })
+            else:
+                failed_count += 1
+                event.publish_status = "failed"
+                results.append({
+                    "event_id": str(event.id),
+                    "status": "failed",
+                    "error": result.error
+                })
+            
+            db.commit()
+            
+        except Exception as e:
+            logger.error(f"Failed to process event {event.id}: {e}", exc_info=True)
+            failed_count += 1
+            event.publish_status = "failed"
+            results.append({
+                "event_id": str(event.id),
+                "status": "error",
+                "error": str(e)
+            })
+            db.rollback()
+    
+    return {
+        "status": "ok",
+        "message": f"Processed {len(events)} events",
+        "processed": len(events),
+        "published": published_count,
+        "failed": failed_count,
+        "channel": channel,
+        "dry_run": dry_run,
+        "results": results
+    }

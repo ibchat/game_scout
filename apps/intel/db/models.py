@@ -270,6 +270,15 @@ class IntelEvent(Base, TimestampMixin):
     # Publication tracking
     published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     telegram_message_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Business brief fields
+    business_brief_json: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    business_brief_generated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    # Publish status and channel
+    publish_status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, server_default="draft")  # draft/published/failed
+    publish_channel: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # public/premium
+    is_premium: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
 
     # Relationships
     cluster: Mapped[Optional["IntelCluster"]] = relationship("IntelCluster", back_populates="events")
@@ -283,6 +292,8 @@ class IntelEvent(Base, TimestampMixin):
         Index("idx_intel_events_score", "score"),
         Index("idx_intel_events_event_type", "event_type"),
         Index("idx_intel_events_cluster_id", "cluster_id"),
+        Index("idx_intel_events_publish_status", "publish_status"),
+        Index("idx_intel_events_is_premium", "is_premium"),
     )
 
 
