@@ -172,10 +172,21 @@ class TelegramPublisher:
             reraise=True
         )
         def _send_with_retry():
+            # Clean HTML tags from message for Telegram HTML parse_mode
+            # Telegram HTML parser is strict and doesn't support all tags
+            import re
+            # Remove unsupported HTML tags but keep text content
+            message_clean = re.sub(r'<br\s*/?>', '\n', message, flags=re.IGNORECASE)
+            message_clean = re.sub(r'</?ul[^>]*>', '', message_clean, flags=re.IGNORECASE)
+            message_clean = re.sub(r'</?li[^>]*>', '• ', message_clean, flags=re.IGNORECASE)
+            message_clean = re.sub(r'<[^>]+>', '', message_clean)  # Remove any remaining HTML tags
+            # Escape HTML entities
+            message_clean = message_clean.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            
             url = f"{self.base_url}/sendMessage"
             payload = {
                 "chat_id": chat_id,
-                "text": message,
+                "text": message_clean,
                 "parse_mode": "HTML"
             }
             
