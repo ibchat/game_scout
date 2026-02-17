@@ -179,3 +179,13 @@ except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"⚠️ VOY module not available: {e}")
 except Exception as e:
     logger.error(f"❌ Error including VOY router: {e}", exc_info=True)
+
+# Intel module - always try to include (guarded by feature flag)
+try:
+    from apps.intel.api import router as intel_router
+    app.include_router(intel_router.router, prefix=API_V1)
+    logger.info("✅ Intel router included successfully")
+except (ImportError, ModuleNotFoundError) as e:
+    logger.warning(f"⚠️ Intel module not available: {e}")
+except Exception as e:
+    logger.error(f"❌ Error including Intel router: {e}", exc_info=True)
