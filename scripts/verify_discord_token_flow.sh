@@ -96,6 +96,7 @@ if [[ "$API_CONFIGURED" == "False" ]] || [[ "$WORKER_CONFIGURED" == "False" ]]; 
   fi
   
   echo "✅ PASS: Placeholder token correctly handled (skipped with 'not configured')"
+  exit 0
 else
   # Если валидатор True → endpoint НЕ должен возвращать "not configured"
   if [[ -n "$ERRORS" ]]; then
@@ -104,6 +105,7 @@ else
   fi
   
   echo "✅ PASS: Real token correctly handled (no 'not configured' error)"
+  exit 0
 fi
 
 echo "✅ PASS: Token flow verification complete"

@@ -30,6 +30,12 @@ def is_discord_token_configured(token: str) -> bool:
     """
     Проверяет, что токен реально настроен (не placeholder, не пустой, достаточной длины).
     
+    Правила валидации:
+    - Токен НЕвалидный, если:
+      - пустой
+      - содержит (case-insensitive): put_real, paste_real, your_real, token_here
+      - длина < 50 символов
+    
     Args:
         token: Токен для проверки
         
@@ -41,22 +47,17 @@ def is_discord_token_configured(token: str) -> bool:
     
     token_lower = token.lower().strip()
     
-    # Список известных placeholder'ов (case-insensitive)
-    placeholders_lower = {
-        "put_real_token_here",
-        "paste_real_discord_bot_token_here",
-        "paste_your_real_discord_bot_token_here",
-        "real_token",
-        "your_real_token",
-        "<empty>"
-    }
+    # Проверка на запрещённые слова (case-insensitive)
+    forbidden_patterns = [
+        "put_real",
+        "paste_real",
+        "your_real",
+        "token_here"
+    ]
     
-    if token_lower in placeholders_lower:
-        return False
-    
-    # Проверка: начинается с "paste_" и содержит "token" (case-insensitive)
-    if token_lower.startswith("paste_") and "token" in token_lower:
-        return False
+    for pattern in forbidden_patterns:
+        if pattern in token_lower:
+            return False
     
     # Минимальная длина реального токена (Discord bot tokens обычно >= 50 символов)
     if len(token) < 50:
@@ -153,7 +154,7 @@ def collect_discord_signals_task(days: int = 1) -> Dict[str, Any]:
         if not is_discord_token_configured(discord_token):
             logger.warning("DISCORD_BOT_TOKEN not configured or invalid, skipping Discord signal collection")
             results["status"] = "skipped"
-            results["errors"].append("DISCORD_BOT_TOKEN not configured (set real token in .env)")
+            results["errors"].append("DISCORD_BOT_TOKEN not configured. See docs/DISCORD_BOT_TOKEN_SETUP.md")
             return results
         
         scraper = DiscordScraper(bot_token=discord_token)
