@@ -242,6 +242,38 @@ def run_orchestrator_smoke() -> SupervisorResult:
     else:
         warnings.append(f"Smoke script not found: {smoke_script}")
     
+    # Check 8: Pipeline dry_run with significance scores
+    try:
+        from apps.intel.services.pipeline.steam_intel_pipeline import run_pipeline
+        from apps.db.session import SessionLocal
+        
+        db = SessionLocal()
+        try:
+            # Run pipeline in dry_run mode
+            result = run_pipeline(
+                sources=["Steam RSS test"],  # Use test source if exists
+                db=db,
+                dry_run=True
+            )
+            
+            # Check that events have significance_score
+            events_with_score = db.query(IntelEvent).filter(
+                IntelEvent.significance_score > 0
+            ).count()
+            
+            if events_with_score > 0:
+                # Success - events have scores
+                pass
+            elif result.get("events_created", 0) > 0:
+                warnings.append(f"Pipeline created {result['events_created']} events but none have significance_score > 0")
+            else:
+                # No events created - may be normal
+                pass
+        finally:
+            db.close()
+    except Exception as e:
+        warnings.append(f"Could not check pipeline significance scores: {str(e)}")
+    
     status = StageStatus.FAIL if errors else (StageStatus.WARN if warnings else StageStatus.OK)
     
     return SupervisorResult(

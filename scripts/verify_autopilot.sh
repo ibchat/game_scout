@@ -195,6 +195,48 @@ else
 fi
 echo ""
 
+# 8) Check Telegram health (if configured)
+echo "8. Checking Telegram health (if configured)..."
+TELEGRAM_HEALTH=$(docker compose exec -T api python -c "
+import sys
+import httpx
+
+try:
+    response = httpx.get('http://localhost:8000/api/v1/intel/health', timeout=5)
+    if response.status_code == 200:
+        data = response.json()
+        telegram_configured = data.get('telegram_configured', False)
+        telegram_ok = data.get('telegram_ok', False)
+        
+        if telegram_configured:
+            if telegram_ok:
+                print('OK:telegram_ok=true')
+                sys.exit(0)
+            else:
+                print('WARN:telegram_configured but telegram_ok=false')
+                sys.exit(0)  # WARN, not FAIL
+        else:
+            print('WARN:telegram not configured (expected in dev)')
+            sys.exit(0)  # WARN, not FAIL
+    else:
+        print(f'ERROR:health endpoint returned {response.status_code}')
+        sys.exit(1)
+except Exception as e:
+    print(f'ERROR:{e}')
+    sys.exit(1)
+" 2>&1)
+
+if echo "$TELEGRAM_HEALTH" | grep -q "OK:"; then
+    echo "   ✅ Telegram health OK"
+elif echo "$TELEGRAM_HEALTH" | grep -q "WARN:"; then
+    WARN_MSG=$(echo "$TELEGRAM_HEALTH" | grep "WARN:" | cut -d: -f2-)
+    echo "   ⚠️  $WARN_MSG (not blocking)"
+else
+    echo "   ❌ Telegram health check failed: $TELEGRAM_HEALTH"
+    # Don't increment ERRORS - telegram is optional
+fi
+echo ""
+
 # Summary
 echo "================================"
 if [ $ERRORS -eq 0 ]; then
