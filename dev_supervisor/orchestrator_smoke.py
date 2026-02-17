@@ -278,6 +278,36 @@ def run_orchestrator_smoke() -> SupervisorResult:
     except Exception as e:
         warnings.append(f"Could not check pipeline significance scores: {str(e)}")
     
+    # Check 9: Steam relevance filter and Russian translation
+    try:
+        from apps.intel.services.steam_mention_detector import detect_steam_relevance
+        from apps.intel.services.translator import message_is_russian
+        
+        # Test relevance filter
+        test_text_steam = "New game released on Steam"
+        is_relevant, _ = detect_steam_relevance(test_text_steam)
+        if not is_relevant:
+            errors.append("Steam relevance filter not working correctly")
+        
+        test_text_non_steam = "General gaming news"
+        is_relevant, _ = detect_steam_relevance(test_text_non_steam)
+        if is_relevant:
+            warnings.append("Steam relevance filter may be too permissive")
+        
+        # Test Russian check
+        test_russian = "Это русский текст"
+        if not message_is_russian(test_russian):
+            errors.append("Russian language detection not working")
+        
+        test_english = "This is English"
+        if message_is_russian(test_english):
+            errors.append("Russian language detection incorrectly identifies English as Russian")
+            
+    except ImportError as e:
+        warnings.append(f"Could not import steam_mention_detector or translator: {str(e)}")
+    except Exception as e:
+        warnings.append(f"Could not check relevance filter and translation: {str(e)}")
+    
     status = StageStatus.FAIL if errors else (StageStatus.WARN if warnings else StageStatus.OK)
     
     return SupervisorResult(
