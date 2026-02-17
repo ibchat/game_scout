@@ -20,6 +20,22 @@ from apps.db.models import (
     SignalType
 )
 
+# Import Intel models so Alembic can see them
+try:
+    from apps.intel.db.models import (
+        IntelSource,
+        IntelRawItem,
+        IntelExtractedItem,
+        IntelCluster,
+        IntelEntity,
+        IntelEvent,
+        IntelPublishLog,
+        IntelAuditLog
+    )
+except ImportError:
+    # Intel module not available, skip
+    pass
+
 config = context.config
 
 if config.config_file_name is not None:
