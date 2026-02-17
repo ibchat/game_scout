@@ -51,6 +51,10 @@ services:
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
       VOY_ENABLED: "true"
       INTEL_ENABLED: "true"
+      TELEGRAM_BOT_TOKEN: "8546248502:AAFZwNjcvLfOsClWU-z_8vfPfmSXUS2pUyM"
+      # TELEGRAM_CHAT_ID will be set from .env or via environment variable
+      # Format: -1001234567890 (for channels, starts with -100)
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
     depends_on:
       postgres:
         condition: service_healthy

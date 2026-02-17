@@ -285,10 +285,15 @@ class TelegramPublisher:
                     details["bot_username"] = bot_info.get("username", "unknown")
                     details["bot_id"] = bot_info.get("id", "unknown")
                 else:
+                    error_code = result.get("error_code", 0)
                     error_msg = result.get("description", "Unknown error")
                     # Never expose token in error
                     error_msg = error_msg.replace(self.bot_token, "***TOKEN***")
-                    return False, f"Bot token invalid: {error_msg}", details
+                    
+                    if error_code == 401:
+                        return False, "Invalid bot token: token is incorrect or revoked", details
+                    else:
+                        return False, f"Bot token invalid (code {error_code}): {error_msg}", details
             
             # Check chat access via getChat
             url = f"{self.base_url}/getChat"
@@ -302,9 +307,23 @@ class TelegramPublisher:
                     chat_info = result.get("result", {})
                     details["chat_title"] = chat_info.get("title", chat_info.get("first_name", "unknown"))
                     details["chat_type"] = chat_info.get("type", "unknown")
+                    details["can_post"] = True  # If getChat succeeds, bot has access
                 else:
+                    error_code = result.get("error_code", 0)
                     error_msg = result.get("description", "Unknown error")
-                    return False, f"Chat access failed: {error_msg}", details
+                    
+                    # Detailed error messages
+                    if error_code == 400:
+                        if "chat not found" in error_msg.lower():
+                            return False, "Chat not found: bot may not be added to channel or chat_id is incorrect", details
+                        else:
+                            return False, f"Invalid chat_id: {error_msg}", details
+                    elif error_code == 403:
+                        return False, "Bot not admin: bot must be added as administrator with 'Post messages' permission", details
+                    elif error_code == 401:
+                        return False, "Unauthorized: bot token may be invalid", details
+                    else:
+                        return False, f"Chat access failed (code {error_code}): {error_msg}", details
             
             return True, "", details
             

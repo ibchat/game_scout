@@ -48,6 +48,7 @@ async def intel_health(db: Session = Depends(get_db_session)) -> Dict[str, Any]:
     telegram_configured = False
     telegram_ok = False
     telegram_details = {}
+    telegram_error = None
     try:
         from apps.intel.services.publishers.telegram_publisher import TelegramPublisher
         token, chat_id = get_telegram_config()
@@ -57,8 +58,14 @@ async def intel_health(db: Session = Depends(get_db_session)) -> Dict[str, Any]:
             # Check actual access
             publisher = TelegramPublisher(db)
             telegram_ok, telegram_error, telegram_details = publisher.check_telegram_access()
+            # Add can_post flag if available
+            if telegram_ok and "can_post" not in telegram_details:
+                telegram_details["can_post"] = True
+        else:
+            telegram_error = "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not configured"
     except Exception as e:
         logger.warning(f"Failed to check Telegram access: {e}")
+        telegram_error = str(e)
     
     # Check DB
     try:
@@ -76,6 +83,7 @@ async def intel_health(db: Session = Depends(get_db_session)) -> Dict[str, Any]:
         "policy_hash": policy_hash,
         "telegram_configured": telegram_configured,
         "telegram_ok": telegram_ok,
+        "telegram_error": telegram_error if not telegram_ok else None,
         "telegram_details": telegram_details if telegram_ok else {},
         "db_ok": db_ok
     }
