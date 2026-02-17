@@ -4,7 +4,8 @@
 version: 1.0
 
 # Source filtering
-allowed_domains: []  # Empty by default, set INTEL_SOURCES_ALLOWLIST_ONLY=false to allow all
+allowed_domains:
+  - store.steampowered.com  # Steam RSS feeds for smoke testing
 blocked_domains: []
 
 # Event types configuration
