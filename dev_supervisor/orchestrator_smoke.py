@@ -308,6 +308,48 @@ def run_orchestrator_smoke() -> SupervisorResult:
     except Exception as e:
         warnings.append(f"Could not check relevance filter and translation: {str(e)}")
     
+    # Check 10: Production pipeline check
+    try:
+        import subprocess
+        import os
+        
+        script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts", "intel_production_check.sh")
+        if os.path.exists(script_path):
+            # Run production check script
+            result = subprocess.run(
+                ["bash", script_path],
+                capture_output=True,
+                text=True,
+                timeout=180,  # 3 minutes max
+                cwd=os.path.dirname(os.path.dirname(__file__))
+            )
+            
+            if result.returncode == 0:
+                details["production_check"] = "passed"
+                # Extract published count from output
+                if "Published:" in result.stdout:
+                    published_line = [line for line in result.stdout.split("\n") if "Published:" in line][-1]
+                    try:
+                        published_count = int(published_line.split("Published:")[-1].strip().split()[0])
+                        if published_count > 0:
+                            details["published_count"] = published_count
+                    except (ValueError, IndexError):
+                        pass
+            else:
+                errors.append(f"Production check failed (exit code {result.returncode})")
+                if result.stderr:
+                    errors.append(f"Production check stderr: {result.stderr[:200]}")
+                details["production_check"] = "failed"
+        else:
+            warnings.append(f"Production check script not found: {script_path}")
+            details["production_check"] = "script_not_found"
+    except subprocess.TimeoutExpired:
+        errors.append("Production check timed out (>3 minutes)")
+        details["production_check"] = "timeout"
+    except Exception as e:
+        warnings.append(f"Could not run production check: {str(e)}")
+        details["production_check"] = "error"
+    
     status = StageStatus.FAIL if errors else (StageStatus.WARN if warnings else StageStatus.OK)
     
     return SupervisorResult(
@@ -319,6 +361,7 @@ def run_orchestrator_smoke() -> SupervisorResult:
             "models_checked": True,
             "collectors_checked": True,
             "policy_checked": True,
-            "health_check": health_result
+            "health_check": health_result,
+            "production_check": details.get("production_check", "not_run")
         }
     )
