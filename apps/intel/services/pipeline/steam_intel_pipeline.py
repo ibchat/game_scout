@@ -349,7 +349,7 @@ def run_pipeline(
             else:
                 brief = event.business_brief_json
             
-            # Publish
+            # Publish (publisher expects brief parameter)
             result = publisher.publish_event(event, brief, dry_run=dry_run)
             
             if result.status == "published":
