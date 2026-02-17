@@ -216,6 +216,61 @@ Guardrails check:
 
 See `.cursor/rules/guardrails.md` and `SPECS/WORKFLOW.md` for full workflow rules.
 
+---
+
+## Dev Orchestrator (Autopilot C)
+
+Single-command development orchestrator that runs all checks and validations.
+
+### Quick Start
+
+Run all checks with one command:
+
+```bash
+./scripts/gs-dev.sh
+```
+
+This command:
+1. Ensures Docker services are running
+2. Runs guardrails
+3. Validates migration chain
+4. Runs alembic upgrade head
+5. Validates Intel contracts
+6. Runs contract tests (pytest)
+7. Runs orchestrator smoke test (RSS collection)
+8. Returns exit code 0 if all checks pass
+
+### What It Checks
+
+- **Guardrails**: File deletions, migration changes, Python syntax
+- **Migration Chain**: Alembic chain validity, upgrade head
+- **Contract Validation**: Intel module contracts, policy engine
+- **Contract Tests**: pytest tests_contract/
+- **Smoke Test**: Actual RSS collection to intel_raw_items
+
+### Exit Codes
+
+- `0`: All checks passed (STABLE)
+- `1`: One or more checks failed (FAILED)
+
+### Running Individual Checks
+
+You can also run checks individually inside Docker:
+
+```bash
+# Run guardrails
+docker compose exec -T api bash scripts/guardrail.sh
+
+# Run smoke test
+docker compose exec -T api python scripts/intel_smoke_collect_rss.py
+
+# Run contract tests
+docker compose exec -T api python -m pytest tests_contract/ -v
+
+# Run supervisor manually
+docker compose exec -T api python dev_supervisor/run.py
+```
+
 **API mode** (if you have TikTok API access):
 ```env
 TIKTOK_MODE=api
