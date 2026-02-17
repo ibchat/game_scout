@@ -121,13 +121,13 @@ def run_orchestrator_smoke() -> SupervisorResult:
                 "and 'app.include_router(intel_router.router, prefix=API_V1)' are present."
             )
         elif health_result["error"]:
-            # Other errors (timeout, connection) are warnings if API might not be ready
-            warnings.append(f"Intel health endpoint not reachable: {health_result['error']}")
+            # Other errors (timeout, connection) are errors in strict mode
+            errors.append(f"Intel health endpoint not reachable: {health_result['error']}")
         else:
             if not health_result["ok"]:
-                warnings.append("Intel health endpoint returned not OK")
+                errors.append("Intel health endpoint returned not OK (expected enabled=true, status=200)")
             if not health_result["policy_loaded"]:
-                warnings.append("Intel health endpoint reports policy not loaded")
+                errors.append("Intel health endpoint reports policy not loaded")
     else:
         # On host: skip health check (API might not be exposed to host)
         warnings.append("Health check skipped (running on host, API may not be exposed)")
@@ -164,14 +164,14 @@ def run_orchestrator_smoke() -> SupervisorResult:
                                     db_count = db.query(IntelRawItem).count()
                                     db.close()
                                     if db_count > 0:
-                                        # Success
+                                        # Success - verified
                                         pass
                                     else:
                                         errors.append(f"Smoke test reported TOTAL={total} but DB query returned 0")
                                 except Exception as db_err:
-                                    warnings.append(f"Could not verify DB count: {str(db_err)}")
+                                    errors.append(f"Could not verify DB count: {str(db_err)}")
                             else:
-                                errors.append("Smoke test: TOTAL is 0, no items in database")
+                                errors.append("Smoke test: TOTAL is 0, no items in database (FAIL)")
                         else:
                             warnings.append("Smoke test: Could not parse COLLECTED/TOTAL from output")
                     else:
