@@ -70,10 +70,11 @@ async def intel_health(db: Session = Depends(get_db_session)) -> Dict[str, Any]:
     
     # Check DB
     try:
-        db.execute("SELECT 1")
+        from sqlalchemy import text
+        db.execute(text("SELECT 1"))
         db_ok = True
     except Exception:
-        pass
+        db_ok = False
     
     return {
         "status": "ok" if is_intel_enabled() else "disabled",
