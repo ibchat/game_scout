@@ -75,6 +75,147 @@ REDIS_URL=redis://redis:6379/0
 
 **Default mode**: Scraping (no API needed, may be blocked)
 
+---
+
+## Intel Module Configuration
+
+**Intel** is a news and signal collection system for Steam games. It collects mentions/news from external sources, processes them, and can publish to Telegram.
+
+### Enabling Intel
+
+Intel is **disabled by default** for safety. To enable:
+
+```env
+INTEL_ENABLED=true
+```
+
+### Feature Flags
+
+```env
+# Enable Intel module (required)
+INTEL_ENABLED=false
+
+# Dry-run mode: processes data but doesn't publish (recommended for testing)
+INTEL_DRY_RUN=true
+
+# Auto-publish to Telegram (requires INTEL_ENABLED=true and INTEL_DRY_RUN=false)
+INTEL_AUTO_PUBLISH=false
+
+# Only auto-publish "safe" event types (release, patch_major, discount)
+INTEL_AUTO_PUBLISH_SAFE_ONLY=true
+```
+
+### Rate Limits
+
+```env
+# Maximum posts per hour/day
+INTEL_MAX_POSTS_PER_HOUR=5
+INTEL_MAX_POSTS_PER_DAY=30
+```
+
+### Source Filtering
+
+```env
+# Only allow sources from allowlist (recommended)
+INTEL_SOURCES_ALLOWLIST_ONLY=true
+```
+
+### LLM Configuration
+
+Intel uses separate LLM settings from main pipeline:
+
+```env
+INTEL_LLM_PROVIDER=anthropic
+INTEL_LLM_MODEL_FAST=claude-3-5-haiku-20241022
+INTEL_LLM_MODEL_STRONG=claude-3-5-sonnet-20241022
+```
+
+### Telegram Setup
+
+1. Create a Telegram bot via [@BotFather](https://t.me/botfather)
+2. Get bot token
+3. Create a channel (private recommended for testing)
+4. Add bot as admin with "Post messages" permission
+5. Get chat ID (use `getUpdates` API or check channel posts)
+
+```env
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+```
+
+### Pipeline Configuration
+
+```env
+# How often to collect new items (in minutes)
+INTEL_COLLECT_INTERVAL_MINUTES=60
+
+# Batch size for processing
+INTEL_PIPELINE_BATCH_SIZE=50
+```
+
+### Recommended Setup Flow
+
+1. **Testing mode** (safe):
+   ```env
+   INTEL_ENABLED=true
+   INTEL_DRY_RUN=true
+   INTEL_AUTO_PUBLISH=false
+   ```
+
+2. **Manual review mode**:
+   ```env
+   INTEL_ENABLED=true
+   INTEL_DRY_RUN=false
+   INTEL_AUTO_PUBLISH=false
+   ```
+   Review events in dashboard, publish manually.
+
+3. **Safe auto-publish**:
+   ```env
+   INTEL_ENABLED=true
+   INTEL_DRY_RUN=false
+   INTEL_AUTO_PUBLISH=true
+   INTEL_AUTO_PUBLISH_SAFE_ONLY=true
+   ```
+
+### Adding Sources
+
+Sources are managed via API or database. See Intel dashboard tab for UI.
+
+### Debugging
+
+Check logs:
+```bash
+docker compose logs worker | grep intel
+docker compose logs beat | grep intel
+```
+
+---
+
+## Guardrails
+
+Quality gates are enforced via `scripts/guardrail.sh` to ensure:
+- No unexpected file deletions
+- Alembic migration chain validity
+- Python syntax correctness
+- No unauthorized changes to existing migrations
+
+### Running Guardrails
+
+```bash
+bash scripts/guardrail.sh
+```
+
+**Always run guardrails before committing** to ensure code quality and prevent breaking changes.
+
+Guardrails check:
+1. No unexpected file deletions
+2. Alembic chain validity (single head)
+3. Python syntax in Intel module
+4. No changes to existing migrations (001-008)
+
+See `.cursor/rules/guardrails.md` and `SPECS/WORKFLOW.md` for full workflow rules.
+
 **API mode** (if you have TikTok API access):
 ```env
 TIKTOK_MODE=api
