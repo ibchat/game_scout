@@ -136,9 +136,33 @@ fi
 
 EXIT_CODE=$?
 
+# Run production check if supervisor passed
+if [ $EXIT_CODE -eq 0 ]; then
+    echo ""
+    echo "🔍 Running Intel production check..."
+    echo ""
+    
+    if docker compose exec -T api bash scripts/intel_production_check.sh 2>&1; then
+        PROD_CHECK_EXIT=0
+    else
+        PROD_CHECK_EXIT=$?
+        if [ $PROD_CHECK_EXIT -ne 0 ]; then
+            echo ""
+            echo "⚠️  Production check failed (exit code: $PROD_CHECK_EXIT)"
+            echo "   This may indicate pipeline issues even if supervisor passed."
+            # Don't fail gs-dev.sh, just warn
+        fi
+    fi
+fi
+
 echo ""
 if [ $EXIT_CODE -eq 0 ]; then
     echo "✅ Dev Orchestrator: STABLE"
+    if [ "${PROD_CHECK_EXIT:-0}" -eq 0 ]; then
+        echo "✅ Production Check: PASSED"
+    else
+        echo "⚠️  Production Check: FAILED (see above)"
+    fi
 else
     echo "❌ Dev Orchestrator: FAILED (exit code: $EXIT_CODE)"
     if [ "$AUTOFIX_MODE" = false ]; then

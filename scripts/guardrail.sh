@@ -100,6 +100,32 @@ else
 fi
 echo ""
 
+# Check 5: Security - Telegram token leak detection
+echo "5. Checking for Telegram token leaks..."
+TOKEN_PATTERN='[0-9]+:[A-Za-z0-9_-]{30,}'
+TOKEN_LEAKS=$(git ls-files | xargs grep -lE "$TOKEN_PATTERN" 2>/dev/null | grep -vE '\.(md|txt)$' | grep -v 'INTEL_TELEGRAM_SETUP.md' | grep -v 'TELEGRAM_CHAT_ID_SETUP.md' | grep -v 'get_telegram_chat_id.py' || true)
+
+if [ -n "$TOKEN_LEAKS" ]; then
+    echo -e "   ${RED}✗${NC} CRITICAL: Telegram token pattern found in tracked files:"
+    echo "$TOKEN_LEAKS" | sed 's/^/      /'
+    echo "   ACTION REQUIRED:"
+    echo "   1. Remove token from these files"
+    echo "   2. Use .env file (already in .gitignore)"
+    echo "   3. Rotate token via @BotFather"
+    ERRORS+=("Telegram token leak detected")
+    EXIT_CODE=1
+else
+    echo -e "   ${GREEN}✓${NC} No Telegram token leaks detected"
+fi
+
+# Also check docker-compose.yml specifically (should use env vars)
+if grep -qE "$TOKEN_PATTERN" docker-compose.yml 2>/dev/null; then
+    echo -e "   ${YELLOW}⚠${NC}  WARNING: Token pattern found in docker-compose.yml"
+    echo "   Consider using environment variable reference: \${TELEGRAM_BOT_TOKEN}"
+    # Don't fail, just warn
+fi
+echo ""
+
 # Summary
 echo "=== Summary ==="
 if [ $EXIT_CODE -eq 0 ]; then

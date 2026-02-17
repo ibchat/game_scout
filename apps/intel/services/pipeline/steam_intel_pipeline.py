@@ -307,29 +307,21 @@ def run_pipeline(
     skipped_count = 0
     briefs_generated = 0
     
-    for event in events:
+    # Get only eligible events for publishing
+    eligible_events = [e for e in events if e.autopublish_eligible]
+    logger.info(f"Processing {len(eligible_events)} eligible events out of {len(events)} total")
+    
+    for event in eligible_events:
         try:
-            # Skip if not eligible
-            if not event.autopublish_eligible:
-                # Create publish log with skipped status and detailed info
+            # Check if event type is allowed
+            if event.event_type not in allowed_types:
+                logger.debug(f"Event type {event.event_type} not in allowed_types, skipping")
                 from apps.intel.db.models import IntelPublishLog
-                skip_reason = "not_eligible"
-                if event.significance_score < min_score:
-                    skip_reason = f"below_threshold (score={event.significance_score}, min={min_score})"
-                elif event.event_type in never_autopublish:
-                    skip_reason = f"blocked_category ({event.event_type})"
-                elif event.significance_reason:
-                    skip_reason = f"not_eligible: {event.significance_reason}"
-                
-                # Log skip reason
-                logger.info(f"Event {event.id} skipped: {skip_reason} (score={event.significance_score}, type={event.event_type})")
-                
-                # Check if already logged
+                skip_reason = f"event_type_not_allowed ({event.event_type})"
                 existing_log = db.query(IntelPublishLog).filter(
                     IntelPublishLog.event_id == event.id,
-                    IntelPublishLog.status == "skipped"
+                    IntelPublishLog.status.in_(["skipped", "published"])
                 ).first()
-                
                 if not existing_log:
                     publish_log = IntelPublishLog(
                         event_id=event.id,
@@ -337,49 +329,75 @@ def run_pipeline(
                         telegram_message_id="",
                         status="skipped",
                         error=skip_reason,
-                        payload={
-                            "significance_score": event.significance_score,
-                            "significance_reason": event.significance_reason,
-                            "event_type": event.event_type,
-                            "eligibility_decision": "rejected",
-                            "skip_reason": skip_reason
-                        }
+                        payload={"event_type": event.event_type, "allowed_types": allowed_types}
                     )
                     db.add(publish_log)
                     db.commit()
-                
                 skipped_count += 1
                 continue
             
-            # Check if event type is allowed
-            if event.event_type not in allowed_types:
-                logger.debug(f"Event type {event.event_type} not in allowed_types, skipping")
-                skipped_count += 1
-                continue
-            
-            # Generate brief if not exists
-            if not event.business_brief_json:
-                brief = generate_business_brief(event, db)
+            # Generate brief (always regenerate for eligible events to ensure freshness)
+            logger.info(f"Generating brief for event {event.id} (type={event.event_type}, score={event.significance_score})")
+            brief = generate_business_brief(event, db)
+            if brief and brief.get("title") and brief.get("what_happened"):
                 event.business_brief_json = brief
                 event.business_brief_generated_at = datetime.utcnow()
                 briefs_generated += 1
                 db.commit()
+                logger.info(f"Brief generated for event {event.id}: title='{brief.get('title', '')[:50]}...'")
             else:
-                brief = event.business_brief_json
+                logger.warning(f"Failed to generate brief for event {event.id} (brief={brief})")
+                from apps.intel.db.models import IntelPublishLog
+                skip_reason = "brief_generation_failed"
+                existing_log = db.query(IntelPublishLog).filter(
+                    IntelPublishLog.event_id == event.id,
+                    IntelPublishLog.status == "skipped"
+                ).first()
+                if not existing_log:
+                    publish_log = IntelPublishLog(
+                        event_id=event.id,
+                        channel_id="free",
+                        telegram_message_id="",
+                        status="skipped",
+                        error=skip_reason,
+                        payload={"brief": brief}
+                    )
+                    db.add(publish_log)
+                    db.commit()
+                skipped_count += 1
+                continue
             
             # Publish (publisher expects brief parameter)
             result = publisher.publish_event(event, brief, dry_run=dry_run)
             
             if result.status == "published":
                 published_count += 1
+                logger.info(f"✅ Event {event.id} published successfully (message_id={result.message_id})")
             elif result.status == "skipped":
+                skip_reason = result.error or "unknown_skip_reason"
+                logger.info(f"⏭️  Event {event.id} skipped: {skip_reason}")
                 skipped_count += 1
             else:
-                logger.warning(f"Publish failed for event {event.id}: {result.error}")
+                logger.warning(f"❌ Publish failed for event {event.id}: {result.error}")
                 skipped_count += 1
                 
         except Exception as e:
             logger.error(f"Failed to process event {event.id}: {e}", exc_info=True)
+            from apps.intel.db.models import IntelPublishLog
+            existing_log = db.query(IntelPublishLog).filter(
+                IntelPublishLog.event_id == event.id,
+                IntelPublishLog.status == "failed"
+            ).first()
+            if not existing_log:
+                publish_log = IntelPublishLog(
+                    event_id=event.id,
+                    channel_id="free",
+                    telegram_message_id="",
+                    status="failed",
+                    error=f"Exception: {str(e)[:200]}"
+                )
+                db.add(publish_log)
+                db.commit()
             skipped_count += 1
             db.rollback()
     

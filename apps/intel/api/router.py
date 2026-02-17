@@ -335,6 +335,11 @@ async def test_telegram(
     test_message = f"{test_text} - {datetime.utcnow().isoformat()}"
     
     try:
+        # Ensure message is in Russian
+        from apps.intel.services.translator import translate_to_ru, message_is_russian
+        if not message_is_russian(test_message):
+            test_message = translate_to_ru(test_message)
+        
         success, message_id, error = publisher._send_to_telegram(test_message)
         
         if success:
