@@ -58,7 +58,8 @@ def check_intel_health(base_url: str = "http://localhost:8000") -> Dict[str, Any
     Check Intel health endpoint.
     Returns: {"ok": bool, "policy_loaded": bool, "policy_version": str or None, "error": str or None}
     """
-    url = f"{base_url}/intel/health"
+    # Intel router is mounted at /api/v1, so endpoint is /api/v1/intel/health
+    url = f"{base_url}/api/v1/intel/health"
     
     result = http_get(url, timeout=5)
     
