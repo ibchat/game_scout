@@ -18,7 +18,7 @@ class RedditRSSCollector(RSSCollector):
     
     REDDIT_RSS_BASE = "https://www.reddit.com"
     
-    def collect(self, db: Session, source: IntelSource) -> Dict[str, int]:
+    def collect(self, source: IntelSource) -> Dict[str, int]:
         """
         Collect items from Reddit RSS feed.
         Source URL can be:
@@ -43,7 +43,7 @@ class RedditRSSCollector(RSSCollector):
         
         try:
             # Use parent RSS collector
-            result = super().collect(db, source)
+            result = super().collect(source)
             return result
         finally:
             # Restore original URL
@@ -89,4 +89,3 @@ class RedditRSSCollector(RSSCollector):
 
 
 # Global instance
-reddit_rss_collector = RedditRSSCollector()

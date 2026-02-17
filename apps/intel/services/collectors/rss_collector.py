@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class RSSCollector(BaseIntelCollector):
     """Collector for RSS feeds."""
     
-    def collect(self, db: Session, source: IntelSource) -> Dict[str, int]:
+    def collect(self, source: IntelSource) -> Dict[str, int]:
         """
         Collect items from RSS feed.
         Returns: {collected: int, saved: int, errors: int}
@@ -84,7 +84,6 @@ class RSSCollector(BaseIntelCollector):
                     
                     # Save to database
                     raw_item = self.save_raw_item(
-                        db=db,
                         source=source,
                         url=url,
                         title=title,
@@ -105,7 +104,3 @@ class RSSCollector(BaseIntelCollector):
         except Exception as e:
             logger.error(f"RSS collection failed for {source.url}: {e}", exc_info=True)
             return {"collected": collected, "saved": saved, "errors": errors + 1}
-
-
-# Global instance
-rss_collector = RSSCollector()

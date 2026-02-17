@@ -20,7 +20,7 @@ class SteamNewsCollector(BaseIntelCollector):
     
     STEAM_NEWS_API = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
     
-    def collect(self, db: Session, source: IntelSource) -> Dict[str, int]:
+    def collect(self, source: IntelSource) -> Dict[str, int]:
         """
         Collect Steam news for games.
         Source URL should be in format: steam://app/{steam_appid}
@@ -90,7 +90,6 @@ class SteamNewsCollector(BaseIntelCollector):
                     
                     # Save to database
                     raw_item = self.save_raw_item(
-                        db=db,
                         source=source,
                         url=url,
                         title=title,
@@ -143,20 +142,20 @@ class SteamNewsCollector(BaseIntelCollector):
     
     def collect_for_apps(
         self,
-        db: Session,
         app_ids: Optional[List[int]] = None,
         limit: int = 100
     ) -> Dict[str, int]:
         """
         Collect Steam news for multiple apps.
         If app_ids is None, gets apps from steam_app_cache.
+        Uses self.db session.
         Returns: {collected: int, saved: int, errors: int}
         """
         # Get or create Steam source
         from apps.intel.db.models import IntelSource
         from sqlalchemy import text
         
-        steam_source = db.query(IntelSource).filter(
+        steam_source = self.db.query(IntelSource).filter(
             IntelSource.type == "steam",
             IntelSource.url.like("steam://app/%")
         ).first()
@@ -169,9 +168,9 @@ class SteamNewsCollector(BaseIntelCollector):
                 url="steam://app/0",  # Placeholder, will be replaced per app
                 is_enabled=True
             )
-            db.add(steam_source)
-            db.commit()
-            db.refresh(steam_source)
+            self.db.add(steam_source)
+            self.db.commit()
+            self.db.refresh(steam_source)
         
         # Get app IDs
         if app_ids is None:
@@ -182,7 +181,7 @@ class SteamNewsCollector(BaseIntelCollector):
                 ORDER BY COALESCE(reviews_total, 0) DESC
                 LIMIT :limit
             """)
-            rows = db.execute(query, {"limit": limit}).mappings().all()
+            rows = self.db.execute(query, {"limit": limit}).mappings().all()
             app_ids = [int(row["steam_app_id"]) for row in rows]
         
         total_collected = 0
@@ -202,7 +201,7 @@ class SteamNewsCollector(BaseIntelCollector):
             
             temp_source = TempSource(steam_source, app_id)
             
-            result = self.collect(db, temp_source)
+            result = self.collect(temp_source)
             total_collected += result["collected"]
             total_saved += result["saved"]
             total_errors += result["errors"]
@@ -215,4 +214,3 @@ class SteamNewsCollector(BaseIntelCollector):
 
 
 # Global instance
-steam_news_collector = SteamNewsCollector()

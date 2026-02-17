@@ -35,16 +35,36 @@ def test_reddit_rss_collector_has_collect_method():
     assert callable(getattr(RedditRSSCollector, 'collect')), "RedditRSSCollector 'collect' is not callable"
 
 
-def test_collectors_can_be_instantiated():
-    """Test that collectors can be instantiated without errors"""
-    rss_collector = RSSCollector()
-    assert rss_collector is not None
+def test_collectors_require_db_session():
+    """Test that collectors require db session in __init__"""
+    from sqlalchemy.orm import Session
+    from unittest.mock import Mock
     
-    steam_collector = SteamNewsCollector()
+    # Mock db session
+    mock_db = Mock(spec=Session)
+    
+    # Should be able to instantiate with db
+    rss_collector = RSSCollector(db=mock_db)
+    assert rss_collector is not None
+    assert rss_collector.db == mock_db
+    
+    steam_collector = SteamNewsCollector(db=mock_db)
     assert steam_collector is not None
     
-    reddit_collector = RedditRSSCollector()
+    reddit_collector = RedditRSSCollector(db=mock_db)
     assert reddit_collector is not None
+
+
+def test_collectors_have_collect_source_method():
+    """Test that collectors have collect_source method"""
+    from sqlalchemy.orm import Session
+    from unittest.mock import Mock
+    
+    mock_db = Mock(spec=Session)
+    
+    rss_collector = RSSCollector(db=mock_db)
+    assert hasattr(rss_collector, 'collect_source'), "RSSCollector should have collect_source method"
+    assert callable(getattr(rss_collector, 'collect_source')), "collect_source should be callable"
 
 
 def test_collectors_inherit_from_base():

@@ -52,7 +52,6 @@ class BaseIntelCollector:
     
     def save_raw_item(
         self,
-        db: Session,
         source: IntelSource,
         url: str,
         title: str,
@@ -62,6 +61,8 @@ class BaseIntelCollector:
     ) -> Optional[IntelRawItem]:
         """
         Save raw item to database with idempotency (UNIQUE url constraint).
+        Uses self.db session.
+        
         Returns: IntelRawItem if saved, None if duplicate or error.
         """
         # Validate URL first
@@ -81,27 +82,28 @@ class BaseIntelCollector:
                 raw_html=raw_html
             )
             
-            db.add(raw_item)
-            db.commit()
-            db.refresh(raw_item)
+            self.db.add(raw_item)
+            self.db.commit()
+            self.db.refresh(raw_item)
             
             logger.debug(f"Saved raw item: {url[:80]}...")
             return raw_item
             
         except IntegrityError:
             # Duplicate URL (idempotency)
-            db.rollback()
+            self.db.rollback()
             logger.debug(f"Duplicate URL (skipped): {url[:80]}...")
             return None
         except Exception as e:
-            db.rollback()
+            self.db.rollback()
             logger.error(f"Failed to save raw item {url}: {e}", exc_info=True)
             return None
     
-    def collect(self, db: Session, source: IntelSource) -> Dict[str, int]:
+    def collect(self, source: IntelSource) -> Dict[str, int]:
         """
-        Collect items from source (legacy method, kept for backward compatibility).
+        Collect items from source.
         Must be implemented by subclasses.
+        Uses self.db session.
         Returns: {collected: int, saved: int, errors: int}
         """
         raise NotImplementedError("Subclasses must implement collect()")
@@ -123,6 +125,6 @@ class BaseIntelCollector:
             logger.warning(f"Source URL rejected by policy: {source.url} - {reason}")
             return 0
         
-        # Use legacy collect method and return saved count
-        result = self.collect(self.db, source)
+        # Use collect method and return saved count
+        result = self.collect(source)
         return result.get("saved", 0)
