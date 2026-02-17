@@ -22,6 +22,7 @@ from apps.api.routers import (
     yearly,
     system_admin,
     deals_v1,
+    discord_discovery,
 )
 
 # relaunch может быть новым модулем — импорт отдельно,
@@ -89,43 +90,54 @@ def root():
 
 @app.get("/dashboard", response_class=HTMLResponse, tags=["Dashboard"])
 def dashboard():
-    # game_scout_dashboard.html лежит в apps/api/static/
-    import os
+    """Main dashboard with all tabs (System, Trends, Deals, Sources, Games, Relaunch, Actions)"""
     from pathlib import Path
+    import os
     
-    # Используем абсолютный путь для надежности
-    base_dir = Path(__file__).parent.parent.parent
-    dashboard_path = base_dir / "apps" / "api" / "static" / "game_scout_dashboard.html"
+    # game_scout_dashboard.html - основной дашборд со всеми вкладками включая Deals
+    # Определяем базовую директорию проекта
+    # __file__ = apps/api/main.py
+    # .parent = apps/api
+    # .parent.parent = apps
+    # .parent.parent.parent = корень проекта
     
     try:
+        # Вариант 1: относительно main.py (основной)
+        base_dir = Path(__file__).parent.parent.parent
+        dashboard_path = base_dir / "apps" / "api" / "static" / "game_scout_dashboard.html"
+        
+        # Если не найден, пробуем другие варианты
+        if not dashboard_path.exists():
+            # Вариант 2: относительно текущей рабочей директории
+            dashboard_path = Path("apps") / "api" / "static" / "game_scout_dashboard.html"
+            
+        if not dashboard_path.exists():
+            # Вариант 3: абсолютный путь
+            dashboard_path = Path(os.getcwd()) / "apps" / "api" / "static" / "game_scout_dashboard.html"
+        
+        if not dashboard_path.exists():
+            error_msg = f"Dashboard file not found. Base dir: {base_dir}, CWD: {os.getcwd()}"
+            logger.error(error_msg)
+            return HTMLResponse(
+                content=f"<h1>Error</h1><p>{error_msg}</p><p>Tried: {dashboard_path}</p>",
+                status_code=500
+            )
+        
         with open(dashboard_path, "r", encoding="utf-8") as f:
             content = f.read()
-            # Добавляем версионирование для обхода кэша браузера
-            # Заменяем в HTML ссылки на статические файлы с версией
-            import hashlib
-            version_hash = hashlib.md5(content.encode()).hexdigest()[:8]
-            # Добавляем meta-тег для версионирования
-            if '<head>' in content:
-                content = content.replace(
-                    '<head>',
-                    f'<head>\n  <meta name="dashboard-version" content="{version_hash}">'
-                )
             return HTMLResponse(
                 content=content,
                 headers={
                     "Cache-Control": "no-cache, no-store, must-revalidate",
                     "Pragma": "no-cache",
-                    "Expires": "0"
+                    "Expires": "0",
+                    "Content-Type": "text/html; charset=utf-8"
                 }
             )
-    except FileNotFoundError:
-        return HTMLResponse(
-            content=f"<h1>Error</h1><p>Dashboard file not found at: {dashboard_path}</p>",
-            status_code=500
-        )
     except Exception as e:
+        logger.error(f"Failed to load dashboard: {e}", exc_info=True)
         return HTMLResponse(
-            content=f"<h1>Error</h1><p>Failed to load dashboard: {str(e)}</p>",
+            content=f"<h1>Error</h1><p>Failed to load dashboard: {str(e)}</p><pre>{type(e).__name__}</pre>",
             status_code=500
         )
 
@@ -152,7 +164,18 @@ app.include_router(yearly.router, prefix=API_V1)
 app.include_router(trends_v1.router, prefix=API_V1)
 app.include_router(system_admin.router, prefix=API_V1)
 app.include_router(deals_v1.router, prefix=API_V1)
+app.include_router(discord_discovery.router, prefix=API_V1)
 
 # ✅ ВАЖНО: relaunch подключаем ТОЛЬКО к /api/v1
 # а prefix="/relaunch" задается ВНУТРИ relaunch.py
 app.include_router(relaunch.router, prefix=API_V1)
+
+# VOY module (read-only overlay) - always try to include
+try:
+    from apps.api.routers import voy
+    app.include_router(voy.router, prefix=API_V1)
+    logger.info("✅ VOY router included successfully")
+except (ImportError, ModuleNotFoundError) as e:
+    logger.warning(f"⚠️ VOY module not available: {e}")
+except Exception as e:
+    logger.error(f"❌ Error including VOY router: {e}", exc_info=True)

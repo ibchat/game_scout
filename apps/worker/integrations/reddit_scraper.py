@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import logging
 from datetime import datetime
 import time
-from typing import List
+from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -84,10 +84,29 @@ class RedditScraper:
                         'limit': min(limit_per_sub, 100)
                     }
                     
-                    response = requests.get(url, headers=self.headers, params=params, timeout=15)
+                    # B2: Backoff на 429 с экспоненциальной паузой
+                    response = None
+                    max_retries = 3
+                    for retry in range(max_retries):
+                        response = requests.get(url, headers=self.headers, params=params, timeout=15)
+                        
+                        if response.status_code == 429:
+                            if retry < max_retries - 1:
+                                backoff_seconds = [3, 7, 15][retry]
+                                logger.warning(f"Reddit /r/{subreddit} returned 429 (rate limited), retrying in {backoff_seconds}s (attempt {retry + 1}/{max_retries})")
+                                time.sleep(backoff_seconds)
+                                continue
+                            else:
+                                logger.warning(f"Reddit /r/{subreddit} returned 429 after {max_retries} retries, skipping subreddit")
+                                break
+                        elif response.status_code != 200:
+                            logger.warning(f"Reddit /r/{subreddit} returned {response.status_code}")
+                            break
+                        else:
+                            # Success
+                            break
                     
-                    if response.status_code != 200:
-                        logger.warning(f"Reddit /r/{subreddit} returned {response.status_code}")
+                    if response is None or response.status_code != 200:
                         continue
                     
                     data = response.json()
@@ -128,4 +147,107 @@ class RedditScraper:
             
         except Exception as e:
             logger.error(f"Reddit get_new_posts error: {e}", exc_info=True)
+            return []
+    
+    def get_post_comments(self, permalink_or_post_id: str, subreddit: str = "", limit: int = 20) -> list[dict]:
+        """
+        Fetch top comments for a reddit post permalink.
+        
+        Args:
+            permalink_or_post_id: Can be:
+                - Full URL: "https://reddit.com/r/Steam/comments/xxxxxx/some_title/"
+                - Permalink path: "/r/Steam/comments/xxxxxx/some_title/"
+                - Post ID (if subreddit provided): "xxxxxx"
+            subreddit: Subreddit name (required if permalink_or_post_id is just post_id)
+            limit: Maximum comments to return
+        
+        Returns:
+            list[dict] with keys: id, body, permalink, created_utc, score
+        """
+        try:
+            if not permalink_or_post_id:
+                return []
+            
+            # Normalize permalink
+            permalink = permalink_or_post_id
+            
+            # If it's a full URL, extract the path
+            if permalink.startswith("http://") or permalink.startswith("https://"):
+                # Extract path from URL
+                from urllib.parse import urlparse
+                parsed = urlparse(permalink)
+                permalink = parsed.path
+            # If it's just a post_id and we have subreddit, construct permalink
+            elif subreddit and not permalink.startswith("/"):
+                # Assume it's a post_id, construct permalink
+                permalink = f"/r/{subreddit}/comments/{permalink}/"
+            # If it's a path without leading slash, add it
+            elif not permalink.startswith("/"):
+                permalink = "/" + permalink
+            
+            # Ensure permalink ends with / for Reddit API
+            if not permalink.endswith("/"):
+                permalink = permalink + "/"
+
+            url = f"https://www.reddit.com{permalink}.json?raw_json=1"
+
+            # Используем тот же паттерн что и в других методах класса
+            response = requests.get(url, headers=self.headers, timeout=15)
+            
+            if response.status_code != 200:
+                logger.warning(f"Reddit comments for {permalink} returned {response.status_code}")
+                return []
+            
+            data = response.json()
+            
+            if not data or not isinstance(data, list) or len(data) < 2:
+                return []
+
+            comments_listing = data[1]
+            if not isinstance(comments_listing, dict):
+                return []
+
+            children = (comments_listing.get("data", {}) or {}).get("children", []) or []
+            if not isinstance(children, list):
+                return []
+
+            out: list[dict] = []
+            for ch in children:
+                if not isinstance(ch, dict):
+                    continue
+                if ch.get("kind") != "t1":
+                    continue
+                cd = ch.get("data", {}) or {}
+                if not isinstance(cd, dict):
+                    continue
+
+                body = (cd.get("body") or "").strip()
+                if not body:
+                    continue
+
+                # Build full permalink URL if relative
+                comment_permalink = cd.get("permalink", "")
+                if comment_permalink and not comment_permalink.startswith("http"):
+                    comment_permalink = f"https://reddit.com{comment_permalink}"
+                
+                # Return both formats for compatibility: body/permalink (TZ contract) and text/url (task usage)
+                out.append(
+                    {
+                        "id": cd.get("id"),
+                        "body": body,  # TZ contract
+                        "text": body,  # Task compatibility
+                        "permalink": comment_permalink,  # TZ contract
+                        "url": comment_permalink,  # Task compatibility
+                        "created_utc": cd.get("created_utc"),
+                        "created_at": datetime.fromtimestamp(cd.get("created_utc", 0)).isoformat() if cd.get("created_utc") else None,  # Task compatibility
+                        "score": cd.get("score", 0),
+                    }
+                )
+                if len(out) >= limit:
+                    break
+
+            time.sleep(1)  # Rate limiting (как в других методах)
+            return out
+        except Exception as e:
+            logger.error(f"Error fetching comments for permalink {permalink}: {e}", exc_info=True)
             return []

@@ -51,12 +51,14 @@
     .tabs{
       margin-top: 18px;
       display:flex; gap: 12px;
+      flex-wrap: wrap;
       padding: 14px;
       background: var(--panel);
       border: 1px solid var(--stroke);
       border-radius: 18px;
       backdrop-filter: blur(10px);
-      overflow:auto;
+      overflow-x: auto;
+      overflow-y: visible;
     }
     .tab{
       white-space: nowrap;
@@ -280,6 +282,7 @@
       <div class="tab" data-tab="sources" title="Источники внешних сигналов, используемых для оценки интереса к играм">🧠 Источники данных</div>
       <div class="tab" data-tab="games" title="Полный список игр, известных системе">🗂 База игр</div>
       <div class="tab" data-tab="relaunch" title="Анализ потенциала перезапуска существующих игр">🚀 Relaunch Scout</div>
+      <div class="tab" data-tab="voy" id="voy-tab-button" title="VOY Scout - интеллектуальный скаут для поиска игр">🚀 VOY</div>
       <div class="tab" data-tab="actions" title="Ручное управление этапами пайплайна и диагностика проблем">⚙️ Действия</div>
         </div>
 
@@ -349,6 +352,13 @@
         Игры с признаками поиска издателя/инвестиций. Отдельный слой, не зависит от Emerging/Trends.
       </div>
       
+      <!-- Информация о разнице между Deals и VOY -->
+      <div style="padding: 12px; background: rgba(110,168,255,0.1); border-radius: 8px; margin-bottom: 16px; font-size: 13px; color: var(--muted);">
+        <strong style="color: var(--blue);">💡 Deals vs VOY:</strong><br>
+        <strong>Deals</strong> — игры с явными признаками поиска издателя (behavioral intent: "ищу издателя", "seeking funding" и т.д.). Фокус на явных сигналах о поиске издателя.<br>
+        <strong>VOY</strong> — интеллектуальный скаут с разными целями (publisher_hunt, high_potential, undermarketed), использует skills для скоринга и может обучаться на основе feedback. Более гибкий поиск игр с потенциалом.
+      </div>
+      
       <!-- Статистика -->
       <div class="cards" id="deals-stats-cards"></div>
       
@@ -371,6 +381,10 @@
             <option value="early_access">Ранний доступ</option>
             <option value="released">Выпущено</option>
           </select>
+        </div>
+        <div class="group" style="display: flex; align-items: center; gap: 8px;">
+          <input type="checkbox" id="deals-filter-exclude-irrelevant" checked style="width: 18px; height: 18px; cursor: pointer;">
+          <label for="deals-filter-exclude-irrelevant" style="color: var(--muted); font-size: 13px; cursor: pointer; margin: 0;">Исключить нерелевантные</label>
         </div>
         <button class="btn primary" onclick="loadDeals()" style="margin-left: auto;">Обновить</button>
         <button class="btn" onclick="showDiscordImport()" style="margin-left: 8px;">📥 Импорт из Discord</button>
@@ -605,6 +619,176 @@
                             </div>
     </section>
 
+    <!-- VOY -->
+    <section class="panel hidden" id="panel-voy">
+      <h2>🚀 VOY Scout</h2>
+      <div class="status" style="color: rgba(255,255,255,0.82); margin-bottom: 18px;">
+        Интеллектуальный скаут для поиска игр
+      </div>
+      
+      <!-- VOY Sub-tabs -->
+      <div class="tabs" style="margin-bottom: 20px; border-bottom: 2px solid rgba(255,255,255,0.1);">
+        <div class="tab active" onclick="switchVoySubTab('runs', this)" style="padding: 10px 20px;">Запуски</div>
+        <div class="tab" onclick="switchVoySubTab('methodology', this)" style="padding: 10px 20px;">📋 Методология</div>
+        <div class="tab" onclick="switchVoySubTab('learning', this)" style="padding: 10px 20px;">⚙️ Обучение</div>
+        <div class="tab" onclick="switchVoySubTab('overrides', this)" style="padding: 10px 20px;">🔄 Overrides</div>
+      </div>
+
+      <!-- VOY Runs Sub-tab -->
+      <div id="voy-subtab-runs" class="voy-subtab-content">
+        <div style="margin-bottom: 20px;">
+          <select id="voy-goal-select" style="padding: 8px; margin-right: 10px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;">
+            <option value="">Выберите цель...</option>
+            <option value="publisher_hunt">Publisher Hunt</option>
+            <option value="high_potential">High Potential</option>
+            <option value="undermarketed">Undermarketed Gems</option>
+          </select>
+          <button class="btn" onclick="runVoy()" style="margin-right: 10px;">Запустить VOY</button>
+          <button class="btn" onclick="loadVoyRuns()">↻ Обновить</button>
+        </div>
+        <div id="voy-runs-list" style="margin-bottom: 20px;">
+          <div class="loading">Загрузка запусков VOY...</div>
+        </div>
+        <div id="voy-shortlist-table" style="display: none;">
+          <h3>Shortlist</h3>
+          <table class="games-table" style="width: 100%;">
+            <thead>
+              <tr>
+                <th>Ранг</th>
+                <th>Game ID</th>
+                <th>Название</th>
+                <th>Оценка</th>
+                <th>Объяснение</th>
+                <th>Обратная связь</th>
+              </tr>
+            </thead>
+            <tbody id="voy-shortlist-tbody">
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- VOY Methodology Sub-tab -->
+      <div id="voy-subtab-methodology" class="voy-subtab-content" style="display: none;">
+        <div style="padding: 20px; background: rgba(255,255,255,0.05); border-radius: 8px; border: 2px solid #4a9eff;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3 style="color: #4a9eff;">📋 Методология Bonfire</h3>
+            <span style="color: rgba(255,255,255,0.6); font-size: 0.9rem;">Версия: <span id="voy-methodology-version">-</span></span>
+          </div>
+          <div style="background: rgba(0,0,0,0.2); padding: 20px; border-radius: 8px; border-left: 4px solid #4a9eff;">
+            <div id="voy-methodology-content" style="line-height: 1.8; color: rgba(255,255,255,0.9); padding: 20px; background: rgba(0,0,0,0.2); border-radius: 8px; max-height: 600px; overflow-y: auto;">
+              <div class="loading">Загрузка методологии...</div>
+            </div>
+          </div>
+          <div style="margin-top: 15px; padding: 10px; background: rgba(74, 158, 255, 0.1); border-radius: 4px; border: 1px solid #4a9eff;">
+            <p style="color: #4a9eff; font-size: 0.9rem; margin: 0;">
+              ⚠️ <strong>Нормативный документ (read-only)</strong> — Методология не может быть изменена системой, GPT или автоматически.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- VOY Learning Sub-tab -->
+      <div id="voy-subtab-learning" class="voy-subtab-content" style="display: none;">
+        <!-- Learning Settings -->
+        <div id="voy-learning-settings" style="margin-top: 30px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;">
+          <h3>Настройки Обучения</h3>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;">
+            <div>
+              <label style="display: flex; align-items: center; margin-bottom: 10px;">
+                <input type="checkbox" id="voy-learning-enabled" style="margin-right: 8px;">
+                Обучение включено
+              </label>
+              <label style="display: block; margin-bottom: 10px;">
+                Скорость обучения:
+                <input type="number" id="voy-learning-rate" step="0.01" min="0.01" max="0.5" style="width: 100px; margin-left: 10px; padding: 4px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;">
+              </label>
+              <label style="display: block; margin-bottom: 10px;">
+                Макс. изменение веса:
+                <input type="number" id="voy-max-weight-delta" step="0.01" min="0.01" max="0.5" style="width: 100px; margin-left: 10px; padding: 4px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;">
+              </label>
+              <label style="display: block; margin-bottom: 10px;">
+                Мин. количество feedback:
+                <input type="number" id="voy-min-feedback-count" min="1" max="100" style="width: 100px; margin-left: 10px; padding: 4px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;">
+              </label>
+            </div>
+            <div>
+              <label style="display: block; margin-bottom: 10px;">
+                Мин. вес skill:
+                <input type="number" id="voy-min-skill-weight" step="0.1" min="0.1" max="1.0" style="width: 100px; margin-left: 10px; padding: 4px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;">
+              </label>
+              <label style="display: block; margin-bottom: 10px;">
+                Макс. вес skill:
+                <input type="number" id="voy-max-skill-weight" step="0.1" min="1.0" max="5.0" style="width: 100px; margin-left: 10px; padding: 4px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;">
+              </label>
+              <label style="display: block; margin-bottom: 10px;">
+                Замороженные skills (через запятую):
+                <input type="text" id="voy-frozen-skills" placeholder="skill1, skill2" style="width: 200px; margin-left: 10px; padding: 4px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;">
+              </label>
+              <label style="display: flex; align-items: center; margin-top: 10px;">
+                <input type="checkbox" id="voy-allow-gpt-advice" style="margin-right: 8px;">
+                Разрешить GPT советы
+              </label>
+            </div>
+          </div>
+          <button class="btn" onclick="saveVoyLearningConfig()" style="margin-top: 15px;">💾 Сохранить настройки</button>
+        </div>
+
+        <!-- Learning Log -->
+        <div id="voy-learning-log" style="margin-top: 30px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h3>Журнал Обучения</h3>
+            <div>
+              <select id="voy-log-filter-skill" style="padding: 6px; margin-right: 10px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;">
+                <option value="">Все skills</option>
+              </select>
+              <select id="voy-log-filter-source" style="padding: 6px; margin-right: 10px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;">
+                <option value="">Все источники</option>
+                <option value="feedback">Feedback</option>
+                <option value="gpt_advice">GPT Advice</option>
+              </select>
+              <button class="btn" onclick="loadVoyLearningLog()">↻ Обновить</button>
+            </div>
+          </div>
+          <table class="games-table" style="width: 100%;">
+            <thead>
+              <tr>
+                <th>Skill</th>
+                <th>Старый вес</th>
+                <th>Новый вес</th>
+                <th>Изменение</th>
+                <th>Источник</th>
+                <th>Причина</th>
+                <th>Дата</th>
+              </tr>
+            </thead>
+            <tbody id="voy-learning-log-tbody">
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- VOY Overrides Sub-tab -->
+      <div id="voy-subtab-overrides" class="voy-subtab-content" style="display: none;">
+        <div style="margin-bottom: 15px;">
+          <button class="btn" onclick="loadVoyOverrides()">↻ Обновить</button>
+        </div>
+        <table class="games-table" style="width: 100%;">
+          <thead>
+            <tr>
+              <th>Дата</th>
+              <th>Game ID</th>
+              <th>Рекомендация системы</th>
+              <th>Решение инвестора</th>
+              <th>Причина</th>
+            </tr>
+          </thead>
+          <tbody id="voy-overrides-tbody">
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- Действия -->
     <section class="panel hidden" id="panel-actions">
       <h2>⚙️ Действия / Диагностика</h2>
@@ -686,6 +870,9 @@
         loadGames();
       } else if(tab === "relaunch") {
         loadRelaunch();
+      } else if(tab === "voy") {
+        checkVoyEnabled();
+        switchVoySubTab('runs');
       } else if(tab === "actions") {
         loadActions();
       }
@@ -1248,10 +1435,12 @@
       const minIntent = parseInt(qs("#deals-filter-intent")?.value || "0");
       const minQuality = parseInt(qs("#deals-filter-quality")?.value || "0");
       const stage = qs("#deals-filter-stage")?.value || "";
+      const excludeIrrelevant = qs("#deals-filter-exclude-irrelevant")?.checked !== false; // По умолчанию true
       
       // Загружаем список игр
       let url = `${API}/deals/list?limit=50&min_intent_score=${minIntent}&min_quality_score=${minQuality}`;
       if(stage) url += `&stage=${stage}`;
+      if(excludeIrrelevant) url += `&exclude_verdicts=successful_not_target`;
       
       const dealsData = await jget(url).catch(err => {
         console.error("Deals API error:", err);
@@ -1352,7 +1541,7 @@
                 return `
                   <tr style="border-bottom: 1px solid var(--stroke); ${idx % 2 === 0 ? 'background: rgba(255,255,255,0.02);' : ''}">
                     <td style="padding: 12px;">
-                      <a href="${esc(g.steam_url || `https://store.steampowered.com/app/${g.app_id}/`)}" target="_blank" style="color: var(--blue); text-decoration: none; font-weight: 600;">
+                      <a href="javascript:void(0);" onclick="openGameDetails(${g.app_id})" style="color: var(--blue); text-decoration: none; font-weight: 600; cursor: pointer;">
                         ${esc(g.title || g.name || `App ${g.app_id}`)}
                       </a>
                       <div style="font-size: 11px; color: var(--muted); margin-top: 2px;">
@@ -1371,14 +1560,14 @@
                     <td style="padding: 12px; text-align: center;">
                       <div style="font-weight: 600; color: ${intentColor}; cursor: pointer;" 
                            title="${esc((g.intent_reasons_ru || []).join('; ') || 'Нет причин')}"
-                           onclick="showDealDetail(${g.app_id})">${g.intent_score || 0}</div>
+                           onclick="openGameDetails(${g.app_id})">${g.intent_score || 0}</div>
                       <div style="font-size: 10px; color: var(--muted); margin-top: 2px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" 
                            title="${esc(intentExplanation)}">${esc(intentExplanation)}</div>
                     </td>
                     <td style="padding: 12px; text-align: center;">
                       <div style="font-weight: 600; color: ${qualityColor}; cursor: pointer;" 
                            title="${esc((g.quality_reasons_ru || []).join('; ') || 'Нет причин')}"
-                           onclick="showDealDetail(${g.app_id})">${g.quality_score || 0}</div>
+                           onclick="openGameDetails(${g.app_id})">${g.quality_score || 0}</div>
                       <div style="font-size: 10px; color: var(--muted); margin-top: 2px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" 
                            title="${esc(qualityExplanation)}">${esc(qualityExplanation)}</div>
                     </td>
@@ -1389,7 +1578,7 @@
                       ${g.has_demo ? '✅' : '—'}
                     </td>
                     <td style="padding: 12px;">
-                      <button onclick="showDealDetail(${g.app_id})" class="btn" style="padding: 6px 12px; font-size: 12px;">Действия</button>
+                      <button onclick="openGameDetails(${g.app_id})" class="btn" style="padding: 6px 12px; font-size: 12px;">Действия</button>
                     </td>
                   </tr>
                 `;
@@ -1408,6 +1597,18 @@
   
   let currentDealDetail = null;
   
+  // Универсальная функция для открытия деталей игры
+  async function openGameDetails(appId) {
+    // Сначала пытаемся открыть через showDealDetail (если игра в Deals)
+    try {
+      await showDealDetail(appId);
+    } catch (e) {
+      // Если не получилось, открываем Steam Store
+      console.warn(`Could not open deal details for ${appId}, opening Steam Store`);
+      window.open(`https://store.steampowered.com/app/${appId}`, '_blank');
+    }
+  }
+  
   async function showDealDetail(appId) {
     const modal = qs("#deal-detail-modal");
     if (!modal) {
@@ -1424,8 +1625,31 @@
     }
     
     try {
-      const detail = await jget(`${API}/deals/${appId}/detail`);
-      currentDealDetail = detail;
+      // Пытаемся загрузить детали из deals
+      let detail;
+      try {
+        detail = await jget(`${API}/deals/${appId}/detail`);
+        currentDealDetail = detail;
+      } catch (dealsError) {
+        // Если игра не найдена в deals, показываем базовую информацию
+        console.warn(`Game ${appId} not found in deals, showing basic info`);
+        if (content) {
+          content.innerHTML = `
+            <div style="max-height: 80vh; overflow-y: auto; padding: 20px;">
+              <h2 style="color: var(--text); margin-bottom: 16px;">Игра #${appId}</h2>
+              <p style="color: var(--muted); margin-bottom: 16px;">Детальная информация об этой игре недоступна в разделе Deals.</p>
+              <p style="color: var(--muted); margin-bottom: 16px;">Эта игра может быть доступна в других разделах (VOY, Trends, Emerging).</p>
+              <div style="margin-top: 24px;">
+                <a href="https://store.steampowered.com/app/${appId}" target="_blank" 
+                   style="color: var(--blue); text-decoration: none; padding: 12px 24px; background: rgba(110,168,255,0.1); border-radius: 8px; display: inline-block;">
+                  Открыть в Steam Store →
+                </a>
+              </div>
+            </div>
+          `;
+        }
+        return;
+      }
       
       if (content) {
         const stageNames = {
@@ -1623,11 +1847,11 @@
             <div id="deal-tab-playbooks" class="deal-tab-content" style="display: none;">
               <h3 style="margin-bottom: 16px;">Плейбуки действий</h3>
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <button class="btn" style="padding: 12px; text-align: left;" onclick="alert('Request Pitch Deck')">📄 Запросить Pitch Deck</button>
-                <button class="btn" style="padding: 12px; text-align: left;" onclick="alert('Request Steamworks Metrics')">📊 Запросить Steamworks Metrics</button>
-                <button class="btn" style="padding: 12px; text-align: left;" onclick="alert('Send Offer Template')">✉️ Отправить шаблон предложения</button>
-                <button class="btn" style="padding: 12px; text-align: left;" onclick="alert('Book Call')">📅 Забронировать звонок</button>
-                <button class="btn" style="padding: 12px; text-align: left;" onclick="alert('Add to Watchlist')">👁️ Добавить в Watchlist</button>
+                <button class="btn" style="padding: 12px; text-align: left;" onclick="handlePlaybookAction('pitch_deck')">📄 Запросить Pitch Deck</button>
+                <button class="btn" style="padding: 12px; text-align: left;" onclick="handlePlaybookAction('steamworks_metrics')">📊 Запросить Steamworks Metrics</button>
+                <button class="btn" style="padding: 12px; text-align: left;" onclick="handlePlaybookAction('proposal_template')">✉️ Отправить шаблон предложения</button>
+                <button class="btn" style="padding: 12px; text-align: left;" onclick="handlePlaybookAction('book_call')">📅 Забронировать звонок</button>
+                <button class="btn" style="padding: 12px; text-align: left;" onclick="handlePlaybookAction('watchlist')">👁️ Добавить в Watchlist</button>
               </div>
             </div>
             
@@ -1727,12 +1951,54 @@
   }
   
   function dealAction(action, appId) {
-    // TODO: Реализовать действия через API
-    alert(`Действие "${action}" для приложения ${appId} (пока не реализовано)`);
+    // Используем handlePlaybookAction для единообразия
+    if (!currentDealDetail || currentDealDetail.app_id !== appId) {
+      // Если детали не загружены, загружаем их
+      showDealDetail(appId).then(() => {
+        handlePlaybookAction(action);
+      });
+    } else {
+      handlePlaybookAction(action);
+    }
+  }
+  
+  // Обработчик действий плейбуков
+  function handlePlaybookAction(action) {
+    if (!currentDealDetail || !currentDealDetail.app_id) {
+      alert('Сначала откройте детали игры');
+      return;
+    }
+    
+    const appId = currentDealDetail.app_id;
+    const gameTitle = currentDealDetail.title || `App ${appId}`;
+    
+    switch(action) {
+      case 'pitch_deck':
+        alert(`Запрос Pitch Deck для игры "${gameTitle}" (App ID: ${appId})\n\nЭта функция будет реализована в будущем.`);
+        break;
+      case 'steamworks':
+      case 'steamworks_metrics':
+        alert(`Запрос Steamworks Metrics для игры "${gameTitle}" (App ID: ${appId})\n\nЭта функция будет реализована в будущем.`);
+        break;
+      case 'proposal':
+      case 'proposal_template':
+        alert(`Отправка шаблона предложения для игры "${gameTitle}" (App ID: ${appId})\n\nЭта функция будет реализована в будущем.`);
+        break;
+      case 'call':
+      case 'book_call':
+        alert(`Бронирование звонка для игры "${gameTitle}" (App ID: ${appId})\n\nЭта функция будет реализована в будущем.`);
+        break;
+      case 'watchlist':
+        alert(`Добавление "${gameTitle}" (App ID: ${appId}) в Watchlist\n\nЭта функция будет реализована в будущем.`);
+        break;
+      default:
+        console.warn(`Unknown playbook action: ${action}`);
+        alert(`Действие "${action}" для игры "${gameTitle}" (App ID: ${appId})\n\nЭта функция будет реализована в будущем.`);
+    }
   }
   
   function showDealActions(appId) {
-    showDealDetail(appId);
+    openGameDetails(appId);
   }
 
   // ==========================================
@@ -2995,6 +3261,521 @@
         closeDealModal();
       }
     });
+
+  // ==========================================
+  // VOY Functions
+  // ==========================================
+  async function checkVoyEnabled() {
+    // Вкладка VOY всегда видна, проверка только для логирования
+    try {
+      const response = await fetch('/api/v1/voy/health');
+      const data = await response.json();
+      if (!data.enabled) {
+        console.warn('VOY модуль отключен на сервере, но вкладка доступна');
+      }
+    } catch (error) {
+      console.warn('VOY модуль недоступен:', error);
+    }
+  }
+
+  function switchVoySubTab(subTabName, clickedElement) {
+    document.querySelectorAll('.voy-subtab-content').forEach(tab => {
+      tab.style.display = 'none';
+    });
+    const voyPanel = document.getElementById('panel-voy');
+    if (voyPanel) {
+      voyPanel.querySelectorAll('.tab').forEach(btn => {
+        btn.classList.remove('active');
+      });
+    }
+    const subTabContent = document.getElementById(`voy-subtab-${subTabName}`);
+    if (subTabContent) {
+      subTabContent.style.display = 'block';
+    }
+    if (clickedElement) {
+      clickedElement.classList.add('active');
+    }
+    if (subTabName === 'runs') {
+      loadVoyRuns();
+    } else if (subTabName === 'methodology') {
+      loadVoyMethodology();
+    } else if (subTabName === 'learning') {
+      loadVoyLearningConfig();
+      loadVoyLearningLog();
+    } else if (subTabName === 'overrides') {
+      loadVoyOverrides();
+    }
+  }
+
+  async function runVoy() {
+    const goal = document.getElementById('voy-goal-select')?.value;
+    if (!goal) {
+      alert('Пожалуйста, выберите цель');
+      return;
+    }
+    
+    try {
+      // Создание запуска
+      const createResponse = await fetch('/api/v1/voy/runs', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({goal: goal})
+      });
+      
+      if (!createResponse.ok) {
+        const errorData = await createResponse.json().catch(() => ({ detail: `HTTP ${createResponse.status}` }));
+        throw new Error(errorData.detail || `Ошибка создания запуска: HTTP ${createResponse.status}`);
+      }
+      
+      const run = await createResponse.json();
+      
+      if (!run.id) {
+        throw new Error('Неверный формат ответа: отсутствует ID запуска');
+      }
+      
+      // Выполнение запуска
+      const executeResponse = await fetch(`/api/v1/voy/runs/${run.id}/execute?shortlist_size=10`, {
+        method: 'POST'
+      });
+      
+      if (!executeResponse.ok) {
+        const errorData = await executeResponse.json().catch(() => ({ detail: `HTTP ${executeResponse.status}` }));
+        throw new Error(errorData.detail || `Ошибка выполнения запуска: HTTP ${executeResponse.status}`);
+      }
+      
+      const completedRun = await executeResponse.json();
+      
+      alert('✅ Запуск VOY завершен успешно!');
+      loadVoyRuns(); // Обновляем список запусков
+      loadVoyRun(run.id); // Загружаем результаты
+    } catch (error) {
+      console.error('Ошибка запуска VOY:', error);
+      const errorMsg = error.message || 'Неизвестная ошибка';
+      alert('❌ Ошибка запуска VOY:\n' + errorMsg + '\n\nУбедитесь, что модуль VOY включен (VOY_ENABLED=true) и API доступен.');
+    }
+  }
+
+  async function loadVoyRuns() {
+    const container = document.getElementById('voy-runs-list');
+    if (!container) return;
+    
+    try {
+      container.innerHTML = '<div class="loading">Загрузка запусков VOY...</div>';
+      const response = await fetch('/api/v1/voy/runs?limit=10');
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+      
+      const runs = await response.json();
+      
+      if (!Array.isArray(runs)) {
+        throw new Error('Неверный формат ответа от сервера');
+      }
+      
+      if (runs.length === 0) {
+        container.innerHTML = '<p style="color: var(--muted); padding: 20px; text-align: center;">Пока нет запусков VOY. Создайте первый запуск, выбрав цель и нажав "Запустить VOY".</p>';
+        return;
+      }
+      
+      container.innerHTML = `
+        <h3 style="margin-bottom: 12px;">Последние запуски</h3>
+        <ul style="list-style: none; padding: 0;">
+          ${runs.map(run => `
+            <li style="padding: 12px; margin: 5px 0; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; cursor: pointer; background: rgba(0,0,0,0.2); transition: background 0.2s;" 
+                onmouseover="this.style.background='rgba(110,168,255,0.1)'" 
+                onmouseout="this.style.background='rgba(0,0,0,0.2)'"
+                onclick="loadVoyRun('${run.id}')">
+              <strong style="color: var(--blue);">${run.goal || 'Без цели'}</strong> 
+              <span style="color: var(--muted); margin-left: 8px;">${run.status || 'unknown'}</span>
+              ${run.shortlist_size !== undefined ? `<span style="color: var(--muted); margin-left: 8px;">(${run.shortlist_size} элементов)</span>` : ''}
+              <br><small style="color: var(--muted);">${run.created_at ? new Date(run.created_at).toLocaleString('ru-RU') : 'Дата неизвестна'}</small>
+            </li>
+          `).join('')}
+        </ul>
+      `;
+    } catch (error) {
+      console.error('Ошибка загрузки запусков VOY:', error);
+      const errorMsg = error.message || 'Неизвестная ошибка';
+      container.innerHTML = `
+        <div style="padding: 20px; background: rgba(255,107,129,0.1); border: 1px solid rgba(255,107,129,0.3); border-radius: 8px; color: var(--red);">
+          <strong>Ошибка загрузки запусков:</strong><br>
+          ${errorMsg}<br>
+          <small style="color: var(--muted); margin-top: 8px; display: block;">
+            Убедитесь, что модуль VOY включен (VOY_ENABLED=true) и API доступен.
+          </small>
+        </div>
+      `;
+    }
+  }
+
+  async function loadVoyRun(runId) {
+    const tbody = document.getElementById('voy-shortlist-tbody');
+    const table = document.getElementById('voy-shortlist-table');
+    if (!tbody || !table) return;
+    
+    try {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px;">Загрузка...</td></tr>';
+      table.style.display = 'block';
+      
+      const response = await fetch(`/api/v1/voy/runs/${runId}`);
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (!data.items || !Array.isArray(data.items)) {
+        throw new Error('Неверный формат данных запуска');
+      }
+      
+      if (data.items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: var(--muted);">Нет элементов в shortlist</td></tr>';
+        return;
+      }
+      
+      tbody.innerHTML = data.items.map(item => {
+        // Формируем кликабельную ссылку для Game ID
+        let gameIdLink = '-';
+        if (item.game_id) {
+          if (item.app_id) {
+            // Если есть app_id, открываем детали игры или Steam Store
+            gameIdLink = `<a href="javascript:void(0);" onclick="openGameDetails(${item.app_id});" 
+                style="color: var(--blue); text-decoration: none; font-family: var(--mono); font-size: 12px; cursor: pointer;"
+                onmouseover="this.style.textDecoration='underline'; this.style.color='var(--blue)'" 
+                onmouseout="this.style.textDecoration='none'; this.style.color='var(--blue)'"
+                title="Открыть детали игры">${item.game_id.substring(0, 8)}...</a>`;
+          } else {
+            // Если нет app_id, переключаемся на вкладку Deals
+            gameIdLink = `<a href="javascript:void(0);" onclick="switchTab('deals');" 
+                style="color: var(--blue); text-decoration: none; font-family: var(--mono); font-size: 12px; cursor: pointer;"
+                onmouseover="this.style.textDecoration='underline'; this.style.color='var(--blue)'" 
+                onmouseout="this.style.textDecoration='none'; this.style.color='var(--blue)'"
+                title="Перейти к Deals">${item.game_id.substring(0, 8)}...</a>`;
+          }
+        }
+        
+        // Формируем кликабельную ссылку для названия игры
+        let titleLink = 'N/A';
+        if (item.title && item.title !== 'N/A') {
+          if (item.app_id) {
+            // Если есть app_id, открываем детали игры или Steam Store
+            titleLink = `<a href="javascript:void(0);" onclick="openGameDetails(${item.app_id});" 
+                style="color: var(--blue); text-decoration: none; cursor: pointer;"
+                onmouseover="this.style.textDecoration='underline'; this.style.color='var(--blue)'" 
+                onmouseout="this.style.textDecoration='none'; this.style.color='var(--blue)'"
+                title="Открыть детали игры">${item.title}</a>`;
+          } else if (item.game_id) {
+            // Если нет app_id, переключаемся на вкладку Deals
+            titleLink = `<a href="javascript:void(0);" onclick="switchTab('deals');" 
+                style="color: var(--blue); text-decoration: none; cursor: pointer;"
+                onmouseover="this.style.textDecoration='underline'; this.style.color='var(--blue)'" 
+                onmouseout="this.style.textDecoration='none'; this.style.color='var(--blue)'"
+                title="Перейти к Deals">${item.title}</a>`;
+          } else {
+            titleLink = item.title;
+          }
+        }
+        
+        return `
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 12px; text-align: center;">${item.rank || '-'}</td>
+          <td style="padding: 12px; font-family: var(--mono); font-size: 12px; color: var(--muted);">${gameIdLink}</td>
+          <td style="padding: 12px;">${titleLink}</td>
+          <td style="padding: 12px; text-align: center; font-weight: 600; color: var(--blue);">${item.total_score ? item.total_score.toFixed(2) : '-'}</td>
+          <td style="padding: 12px; color: var(--muted); font-size: 13px; max-width: 300px;">${item.explanation || '-'}</td>
+          <td style="padding: 12px; text-align: center;">
+            <button onclick="submitVoyFeedback('${item.id}', 'good')" 
+                    style="padding: 6px 12px; margin: 0 4px; background: #4caf50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: opacity 0.2s;"
+                    onmouseover="this.style.opacity='0.8'" 
+                    onmouseout="this.style.opacity='1'">👍</button>
+            <button onclick="submitVoyFeedback('${item.id}', 'bad')" 
+                    style="padding: 6px 12px; margin: 0 4px; background: #f44336; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: opacity 0.2s;"
+                    onmouseover="this.style.opacity='0.8'" 
+                    onmouseout="this.style.opacity='1'">👎</button>
+          </td>
+        </tr>
+      `;
+      }).join('');
+    } catch (error) {
+      console.error('Ошибка загрузки запуска VOY:', error);
+      const errorMsg = error.message || 'Неизвестная ошибка';
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 20px; color: var(--red);">Ошибка: ${errorMsg}</td></tr>`;
+    }
+  }
+
+  async function submitVoyFeedback(runItemId, feedbackType) {
+    try {
+      const response = await fetch('/api/v1/voy/feedback', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          run_item_id: runItemId,
+          feedback_type: feedbackType
+        })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+      
+      const result = await response.json();
+      const emoji = feedbackType === 'good' ? '👍' : '👎';
+      alert(`✅ Обратная связь отправлена ${emoji}\n\nСистема обновит веса skills на основе вашего feedback.`);
+      
+      // Обновляем журнал обучения
+      loadVoyLearningLog();
+      
+      // Обновляем текущий запуск, чтобы показать обновленные данные
+      const runId = runItemId; // Можно получить из контекста или передать как параметр
+      // loadVoyRun(runId); // Раскомментировать если нужно обновить shortlist
+    } catch (error) {
+      console.error('Ошибка отправки обратной связи:', error);
+      const errorMsg = error.message || 'Неизвестная ошибка';
+      alert('❌ Ошибка отправки обратной связи:\n' + errorMsg);
+    }
+  }
+
+  async function loadVoyLearningConfig() {
+    try {
+      const response = await fetch('/api/v1/voy/learning-config');
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
+        console.warn('Ошибка загрузки настроек обучения:', errorData.detail || `HTTP ${response.status}`);
+        // Используем значения по умолчанию
+        const enabled = document.getElementById('voy-learning-enabled');
+        if (enabled) enabled.checked = true;
+        const rate = document.getElementById('voy-learning-rate');
+        if (rate) rate.value = 0.05;
+        const delta = document.getElementById('voy-max-weight-delta');
+        if (delta) delta.value = 0.05;
+        const minWeight = document.getElementById('voy-min-skill-weight');
+        if (minWeight) minWeight.value = 0.5;
+        const maxWeight = document.getElementById('voy-max-skill-weight');
+        if (maxWeight) maxWeight.value = 2.0;
+        const minFeedback = document.getElementById('voy-min-feedback-count');
+        if (minFeedback) minFeedback.value = 3;
+        const frozen = document.getElementById('voy-frozen-skills');
+        if (frozen) frozen.value = '';
+        const gpt = document.getElementById('voy-allow-gpt-advice');
+        if (gpt) gpt.checked = true;
+        return;
+      }
+      
+      const config = await response.json();
+      
+      const enabled = document.getElementById('voy-learning-enabled');
+      if (enabled) enabled.checked = config.learning_enabled !== undefined ? config.learning_enabled : true;
+      const rate = document.getElementById('voy-learning-rate');
+      if (rate) rate.value = config.learning_rate !== undefined ? config.learning_rate : 0.05;
+      const delta = document.getElementById('voy-max-weight-delta');
+      if (delta) delta.value = config.max_weight_delta !== undefined ? config.max_weight_delta : 0.05;
+      const minWeight = document.getElementById('voy-min-skill-weight');
+      if (minWeight) minWeight.value = config.min_skill_weight !== undefined ? config.min_skill_weight : 0.5;
+      const maxWeight = document.getElementById('voy-max-skill-weight');
+      if (maxWeight) maxWeight.value = config.max_skill_weight !== undefined ? config.max_skill_weight : 2.0;
+      const minFeedback = document.getElementById('voy-min-feedback-count');
+      if (minFeedback) minFeedback.value = config.min_feedback_count !== undefined ? config.min_feedback_count : 3;
+      const frozen = document.getElementById('voy-frozen-skills');
+      if (frozen) frozen.value = (config.frozen_skills && Array.isArray(config.frozen_skills)) ? config.frozen_skills.join(', ') : '';
+      const gpt = document.getElementById('voy-allow-gpt-advice');
+      if (gpt) gpt.checked = config.allow_gpt_advice !== undefined ? config.allow_gpt_advice : true;
+    } catch (error) {
+      console.error('Ошибка загрузки настроек обучения:', error);
+      // Используем значения по умолчанию при ошибке
+      const enabled = document.getElementById('voy-learning-enabled');
+      if (enabled) enabled.checked = true;
+    }
+  }
+
+  async function saveVoyLearningConfig() {
+    try {
+      const frozenSkillsText = document.getElementById('voy-frozen-skills')?.value || '';
+      const frozenSkills = frozenSkillsText.split(',').map(s => s.trim()).filter(s => s);
+      const config = {
+        learning_enabled: document.getElementById('voy-learning-enabled')?.checked || false,
+        learning_rate: parseFloat(document.getElementById('voy-learning-rate')?.value || 0.05),
+        max_weight_delta: parseFloat(document.getElementById('voy-max-weight-delta')?.value || 0.05),
+        min_skill_weight: parseFloat(document.getElementById('voy-min-skill-weight')?.value || 0.5),
+        max_skill_weight: parseFloat(document.getElementById('voy-max-skill-weight')?.value || 2.0),
+        min_feedback_count: parseInt(document.getElementById('voy-min-feedback-count')?.value || 3),
+        frozen_skills: frozenSkills,
+        allow_gpt_advice: document.getElementById('voy-allow-gpt-advice')?.checked || false
+      };
+      const response = await fetch('/api/v1/voy/learning-config', {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(config)
+      });
+      if (response.ok) {
+        alert('Настройки обучения сохранены');
+      } else {
+        const error = await response.json();
+        alert('Ошибка: ' + error.detail);
+      }
+    } catch (error) {
+      console.error('Ошибка сохранения настроек обучения:', error);
+      alert('Ошибка сохранения настроек обучения');
+    }
+  }
+
+  async function loadVoyLearningLog() {
+    const tbody = document.getElementById('voy-learning-log-tbody');
+    if (!tbody) return;
+    
+    try {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px;">Загрузка...</td></tr>';
+      
+      const skillFilter = document.getElementById('voy-log-filter-skill')?.value || '';
+      const sourceFilter = document.getElementById('voy-log-filter-source')?.value || '';
+      let url = '/api/v1/voy/learning-log?limit=50';
+      if (skillFilter) url += `&skill_key=${skillFilter}`;
+      if (sourceFilter) url += `&source=${sourceFilter}`;
+      
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+      
+      const logs = await response.json();
+      
+      if (!Array.isArray(logs)) {
+        throw new Error('Неверный формат ответа от сервера');
+      }
+      
+      if (logs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px; color: var(--muted);">Нет записей в журнале обучения</td></tr>';
+        return;
+      }
+      
+      tbody.innerHTML = logs.map(log => `
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 12px; font-family: var(--mono); font-size: 12px;">${log.skill_key || '-'}</td>
+          <td style="padding: 12px; text-align: center;">${log.old_weight !== undefined ? log.old_weight.toFixed(3) : '-'}</td>
+          <td style="padding: 12px; text-align: center;">${log.new_weight !== undefined ? log.new_weight.toFixed(3) : '-'}</td>
+          <td style="padding: 12px; text-align: center; color: ${log.delta > 0 ? 'var(--green)' : log.delta < 0 ? 'var(--red)' : 'var(--muted)'};">
+            ${log.delta !== undefined ? (log.delta > 0 ? '+' : '') + log.delta.toFixed(3) : '-'}
+          </td>
+          <td style="padding: 12px; text-align: center;">
+            <span style="padding: 4px 8px; border-radius: 4px; background: ${log.source === 'feedback' ? 'rgba(121,226,155,0.1)' : 'rgba(110,168,255,0.1)'};">
+              ${log.source === 'feedback' ? 'Feedback' : log.source === 'gpt_advice' ? 'GPT Advice' : log.source || '-'}
+            </span>
+          </td>
+          <td style="padding: 12px; color: var(--muted); font-size: 13px; max-width: 200px;">${log.reason || '-'}</td>
+          <td style="padding: 12px; color: var(--muted); font-size: 12px;">${log.created_at ? new Date(log.created_at).toLocaleString('ru-RU') : '-'}</td>
+        </tr>
+      `).join('');
+    } catch (error) {
+      console.error('Ошибка загрузки журнала обучения:', error);
+      const errorMsg = error.message || 'Неизвестная ошибка';
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 20px; color: var(--red);">Ошибка загрузки журнала: ${errorMsg}</td></tr>`;
+    }
+  }
+
+  async function loadVoyMethodology() {
+    const content = document.getElementById('voy-methodology-content');
+    const version = document.getElementById('voy-methodology-version');
+    
+    if (!content) return;
+    
+    try {
+      content.innerHTML = '<div class="loading">Загрузка методологии...</div>';
+      
+      const response = await fetch('/api/v1/voy/methodology');
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+      
+      const methodology = await response.json();
+      
+      if (methodology.content_text) {
+        // Обрабатываем экранированные символы и форматируем текст
+        let formattedText = methodology.content_text
+          .replace(/\\n/g, '\n')  // Заменяем \n на реальные переносы строк
+          .replace(/═══════════════════════════════════════════════════════════════/g, '<hr style="border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;">')
+          .replace(/\n/g, '<br>');  // Преобразуем переносы строк в HTML
+        content.innerHTML = formattedText;
+      } else if (methodology.content) {
+        content.innerHTML = methodology.content.replace(/\n/g, '<br>');
+      } else {
+        content.textContent = 'Методология не найдена';
+      }
+      
+      if (version) {
+        version.textContent = methodology.version || '1.0';
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки методологии:', error);
+      const errorMsg = error.message || 'Неизвестная ошибка';
+      content.innerHTML = `
+        <div style="padding: 20px; background: rgba(255,107,129,0.1); border: 1px solid rgba(255,107,129,0.3); border-radius: 8px; color: var(--red);">
+          <strong>Ошибка загрузки методологии:</strong><br>
+          ${errorMsg}
+        </div>
+      `;
+    }
+  }
+
+  async function loadVoyOverrides() {
+    const tbody = document.getElementById('voy-overrides-tbody');
+    if (!tbody) return;
+    
+    try {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px;">Загрузка...</td></tr>';
+      
+      const response = await fetch('/api/v1/voy/overrides?limit=50');
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+      
+      const overrides = await response.json();
+      
+      if (!Array.isArray(overrides)) {
+        throw new Error('Неверный формат ответа от сервера');
+      }
+      
+      if (overrides.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: var(--muted);">Нет переопределений</td></tr>';
+        return;
+      }
+      
+      tbody.innerHTML = overrides.map(override => `
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 12px; color: var(--muted); font-size: 12px;">${override.created_at ? new Date(override.created_at).toLocaleString('ru-RU') : '-'}</td>
+          <td style="padding: 12px; font-family: var(--mono); font-size: 12px; color: var(--muted);">${override.run_item_id ? override.run_item_id.substring(0, 8) + '...' : '-'}</td>
+          <td style="padding: 12px;">
+            <span style="padding: 4px 8px; border-radius: 4px; background: rgba(255,184,107,0.1); color: var(--orange);">
+              ${override.system_recommendation || '-'}
+            </span>
+          </td>
+          <td style="padding: 12px;">
+            <span style="padding: 4px 8px; border-radius: 4px; background: rgba(121,226,155,0.1); color: var(--green);">
+              ${override.investor_decision || '-'}
+            </span>
+          </td>
+          <td style="padding: 12px; color: var(--muted); font-size: 13px; max-width: 300px;">${override.reason || '-'}</td>
+        </tr>
+      `).join('');
+    } catch (error) {
+      console.error('Ошибка загрузки переопределений:', error);
+      const errorMsg = error.message || 'Неизвестная ошибка';
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 20px; color: var(--red);">Ошибка загрузки переопределений: ${errorMsg}</td></tr>`;
+    }
+  }
+
+  // VOY вкладка всегда видна, проверка статуса опциональна
+  // checkVoyEnabled() вызывается при переключении на вкладку VOY
   </script>
   
   </body>

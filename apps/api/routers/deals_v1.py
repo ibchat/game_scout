@@ -736,14 +736,20 @@ async def get_deals_list(
     min_quality_score: int = Query(0, ge=0, le=100),
     stage: Optional[str] = Query(None, description="Фильтр по stage"),
     synthetic_only: bool = Query(False, description="Только игры с синтетическими сигналами"),
+    explore_mode: bool = Query(False, description="Explore Mode: отключает строгие гейты для широкого списка"),
+    mode: Optional[str] = Query(None, description="Режим: publisher_hunt - только игры с publisher_intent_score > 0 и без издателя"),
+    exclude_verdicts: Optional[str] = Query(None, description="Исключить вердикты (через запятую, например: successful_not_target)"),
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
     """
     Список игр с deal intent.
+    По умолчанию (explore_mode=false) возвращает "витринные" записи с заполненными метаданными.
+    mode=publisher_hunt: только игры с publisher_intent_score > 0 и publisher_status_code != has_publisher.
     """
     try:
-        # Explore Mode: при нулевых порогах отключаем строгие гейты
-        explore_mode = (min_intent_score == 0 and min_quality_score == 0)
+        # Explore Mode: только явный параметр (default=false для витрины)
+        # Для обратной совместимости: если явно не указан, но пороги нулевые - используем витрину
+        # (старая логика была: нулевые пороги = explore_mode, но теперь это только явный параметр)
         logger.info(f"Deals list: explore_mode={explore_mode}, min_intent={min_intent_score}, min_quality={min_quality_score}")
         # Определяем реальное имя колонки app_id в steam_review_daily (один раз)
         app_id_col = detect_steam_review_app_id_column(db)
@@ -876,6 +882,23 @@ async def get_deals_list(
         # Explore Mode: при нулевых порогах отключаем строгие гейты, оставляем только базовую санитарию
         # ВАЖНО: используем реальное имя колонки app_id_col (определено выше)
         
+        # Publisher Hunt mode фильтр (если mode=publisher_hunt)
+        publisher_hunt_filter = ""
+        if mode == "publisher_hunt":
+            publisher_hunt_filter = """
+              -- Publisher Hunt: только игры с publisher_intent_score > 0 и без издателя
+              AND EXISTS (
+                SELECT 1 FROM deal_intent_signal s
+                WHERE s.app_id = d.app_id
+                  AND s.publisher_intent_score > 0
+              )
+              AND (
+                c.publishers IS NULL 
+                OR c.publishers = '[]'::jsonb
+                OR jsonb_array_length(c.publishers) = 0
+              )
+            """
+        
         # Базовые фильтры (применяются всегда)
         base_where = """
             WHERE d.intent_score >= :min_intent_score
@@ -883,6 +906,14 @@ async def get_deals_list(
               -- Базовая санитария: название ОБЯЗАТЕЛЬНО
               AND (c.name IS NOT NULL AND c.name != '' OR g.title IS NOT NULL AND g.title != '')
         """
+        
+        # Витринные фильтры (применяются при explore_mode=false)
+        showcase_filters = ""
+        if not explore_mode:
+            showcase_filters = """
+              -- Витрина: steam_url обязателен
+              AND COALESCE(NULLIF(c.steam_url, ''), d.steam_url, '') != ''
+            """
         
         # Строгие гейты (отключаются в Explore Mode)
         strict_gates = ""
@@ -954,6 +985,8 @@ async def get_deals_list(
                     SELECT MAX(day) FROM steam_review_daily WHERE {app_id_col} = d.app_id::bigint
                 )
             {base_where}
+            {publisher_hunt_filter}
+            {showcase_filters}
             {strict_gates}
             {common_filters}
             {f"AND d.stage = :stage" if stage else ""}
@@ -1011,16 +1044,50 @@ async def get_deals_list(
         }
         
         for row in rows:
+            app_id = row.get("app_id")
             title = row.get("title")
             release_date = row.get("release_date")
+            steam_url = row.get("steam_url") or ""
             
-            # Базовая санитария: название ОБЯЗАТЕЛЬНО (применяется всегда)
+            # A1: Фильтр app_id IS NOT NULL (обязательно для витрины)
+            if not app_id:
+                excluded_count += 1
+                excluded_reasons["no_app_id"] = excluded_reasons.get("no_app_id", 0) + 1
+                diagnostic["excluded_reasons"]["no_app_id"] = diagnostic["excluded_reasons"].get("no_app_id", 0) + 1
+                logger.warning(f"Excluded row: app_id IS NULL")
+                continue
+            
+            # A1: Базовая санитария: название ОБЯЗАТЕЛЬНО (применяется всегда)
             if not title or title.strip() == "":
                 excluded_count += 1
                 excluded_reasons["no_name"] = excluded_reasons.get("no_name", 0) + 1
                 diagnostic["excluded_reasons"]["no_name"] = diagnostic["excluded_reasons"].get("no_name", 0) + 1
-                logger.warning(f"Excluded app_id {row['app_id']}: no name (steam_app_cache.name and games.name both empty)")
+                logger.warning(f"Excluded app_id {app_id}: no name (steam_app_cache.name and games.name both empty)")
                 continue
+            
+            # A2: Нормализация steam_url (только формат https://store.steampowered.com/app/<app_id>/)
+            if steam_url:
+                # Проверяем и нормализуем формат
+                url_match = re.search(r'/app/(\d+)', steam_url)
+                if url_match:
+                    # Извлекаем app_id из URL и нормализуем
+                    extracted_app_id = url_match.group(1)
+                    steam_url = f"https://store.steampowered.com/app/{extracted_app_id}/"
+                elif not steam_url.startswith("https://store.steampowered.com/app/"):
+                    # Если URL не в правильном формате, строим из app_id
+                    steam_url = f"https://store.steampowered.com/app/{app_id}/"
+            else:
+                # Если steam_url пустой, строим из app_id
+                steam_url = f"https://store.steampowered.com/app/{app_id}/"
+            
+            # A1: Витринные фильтры: steam_url обязателен (при explore_mode=false)
+            if not explore_mode:
+                if not steam_url or steam_url.strip() == "":
+                    excluded_count += 1
+                    excluded_reasons["no_steam_url"] = excluded_reasons.get("no_steam_url", 0) + 1
+                    diagnostic["excluded_reasons"]["no_steam_url"] = diagnostic["excluded_reasons"].get("no_steam_url", 0) + 1
+                    logger.debug(f"Excluded app_id {app_id}: no steam_url (витрина)")
+                    continue
             
             # Проверка release_date (отключается в Explore Mode)
             release_date_obj = None
@@ -1078,7 +1145,9 @@ async def get_deals_list(
                 logger.debug(f"Excluded app_id {row['app_id']}: both intent_score and quality_score are 0")
                 continue
             
-            # v3.1: Intent Freshness Gate - проверяем свежесть намерения (отключается в Explore Mode)
+            # v3.1: Intent Freshness Gate - проверяем свежесть намерения
+            # В витринном режиме (explore_mode=false) НЕ применяем Intent Freshness Gate,
+            # так как витрина должна показывать все игры с метаданными
             app_id = row["app_id"]
             signals = signals_by_app.get(app_id, [])
             
@@ -1098,18 +1167,15 @@ async def get_deals_list(
                 "created_at": None  # TODO: получить из trends_seed_apps если есть
             }
             
-            # Проверяем Intent Freshness Gate (отключается в Explore Mode)
-            if not explore_mode:
-                freshness_gate = check_intent_freshness_gate(app_data, signals)
-                if not freshness_gate.get("passes", False):
-                    excluded_count += 1
-                    excluded_reasons["no_freshness"] = excluded_reasons.get("no_freshness", 0) + 1
-                    diagnostic["excluded_reasons"]["no_freshness"] = diagnostic["excluded_reasons"].get("no_freshness", 0) + 1
-                    logger.debug(f"Excluded app_id {app_id}: Intent Freshness Gate failed - {freshness_gate.get('reason', 'unknown')}")
-                    continue
-            else:
+            # Проверяем Intent Freshness Gate (отключается в витринном режиме и Explore Mode)
+            # Витрина (explore_mode=false) = показываем все с метаданными, без строгих гейтов
+            # Explore Mode (explore_mode=true) = показываем все, включая сырые
+            if explore_mode:
                 # В Explore Mode создаем фиктивный freshness_gate для совместимости
                 freshness_gate = {"passes": True, "reason": "explore_mode"}
+            else:
+                # В витринном режиме тоже не применяем Intent Freshness Gate
+                freshness_gate = {"passes": True, "reason": "showcase_mode"}
             
             # Проверяем Success Penalty Gate
             success_penalty = check_success_penalty_gate(app_data, intent_score)
@@ -1153,11 +1219,34 @@ async def get_deals_list(
             publisher_status_code = compute_publisher_status(publishers_raw)
             publisher_status_label = map_publisher_status_label(publisher_status_code)
             
+            # B2: Guard в витрине - если has_publisher, verdict должен быть нейтральный (partner-mode)
+            verdict_label_ru = verdict.get("verdict_label_ru")
+            verdict_code = verdict.get("verdict_code")
+            if publisher_status_code == "has_publisher":
+                # Если есть издатель, но verdict говорит "ищет издателя" - заменяем на partner-mode
+                if "ищет издателя" in verdict_label_ru.lower():
+                    # Заменяем на нейтральный вердикт для partner-mode
+                    if final_intent_score >= 20:
+                        verdict_label_ru = "🟡 Ищет издательского партнёра"
+                    elif final_intent_score >= 10:
+                        verdict_label_ru = "🟠 Возможное партнёрство"
+                    else:
+                        verdict_label_ru = "⚪ Успешный проект, не целевая сделка"
+                        verdict_code = "successful_not_target"
+            
+            # Фильтр по вердикту: исключаем нерелевантные игры
+            if exclude_verdicts:
+                exclude_verdicts_list = [v.strip() for v in exclude_verdicts.split(",")]
+                if verdict_code in exclude_verdicts_list:
+                    excluded_count += 1
+                    excluded_reasons[f"verdict_{verdict_code}"] = excluded_reasons.get(f"verdict_{verdict_code}", 0) + 1
+                    continue
+            
             games.append({
                 "app_id": app_id,
                 "title": title,
                 "name": title,  # Для обратной совместимости
-                "steam_url": row["steam_url"] or f"https://store.steampowered.com/app/{app_id}/",
+                "steam_url": steam_url,  # Используем нормализованный steam_url
                 "developer": row["developer_name"],
                 "publisher": row["publisher_name"],
                 "publisher_status_code": publisher_status_code,  # Код для программной обработки
@@ -1175,8 +1264,8 @@ async def get_deals_list(
                 "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
                 "release_date": release_date_obj.isoformat() if isinstance(release_date_obj, date) else (release_date.isoformat() if hasattr(release_date, 'isoformat') else str(release_date)),
                 # v3: добавляем вердикт
-                "verdict": verdict.get("verdict_code"),
-                "verdict_label_ru": verdict.get("verdict_label_ru")
+                "verdict": verdict_code,  # Используем скорректированный verdict_code
+                "verdict_label_ru": verdict_label_ru  # Используем скорректированный вердикт
             })
         
         diagnostic["after_python_filters"] = len(games)
@@ -2570,22 +2659,41 @@ async def import_discord_signal(
 
 @router.post("/signals/collect_reddit")
 async def collect_reddit_signals(
-    days: int = Query(90, ge=1, le=180, description="Количество дней назад для поиска постов (Vector A EXEC v1: минимум 90, лучше 180)"),
-    limit_per_sub: int = Query(500, ge=1, le=1000, description="Максимум постов на сабреддит (Vector A EXEC v1: минимум 500, лучше 1000)"),
-    include_comments: bool = Query(False, description="Собирать комментарии из постов (Vector A A2)"),
+    days: int = Query(1, ge=1, le=180, description="Количество дней назад для поиска постов (C1: daily scan = 1, Vector A EXEC v1 = 90-180)"),
+    limit_per_sub: int = Query(None, ge=1, le=1000, description="Максимум постов на сабреддит (C1: daily scan = 50, Vector A EXEC v1 = 500-1000)"),
+    include_comments: bool = Query(True, description="Собирать комментарии из постов (C1: daily scan = true, Vector A A2)"),
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
     """
-    Запустить сбор Deal Intent Signals из Reddit (Vector A EXEC v1).
-    Согласно TZ_SIGNAL_INGESTION_VECTOR_A_EXEC_V1.md.
+    Запустить сбор Deal Intent Signals из Reddit.
+    C1: Daily scan (days=1, limit_per_sub=50, include_comments=true) - для ежедневного обновления.
+    Vector A EXEC v1: Historical scan (days=90-180, limit_per_sub=500-1000) - для массового сбора.
+    Согласно TZ_SIGNAL_INGESTION_VECTOR_A_EXEC_V1.md и TZ_DEAL_PIPELINE_V1.md (C1).
     """
     try:
         from apps.worker.tasks.collect_deal_intent_signals_reddit import collect_deal_intent_signals_reddit_task
         
-        logger.info(f"Starting Reddit Deal Intent Signals collection (Vector A EXEC v1), days={days}, limit_per_sub={limit_per_sub}, include_comments={include_comments}")
+        # B1: Ограничить daily defaults для days <= 1
+        if limit_per_sub is None:
+            if days <= 1:
+                limit_per_sub = 50  # Daily-friendly default
+            else:
+                limit_per_sub = 200  # Historical scan default
+        
+        # B1: Ограничить комментарии в daily режиме
+        max_comments_per_post = None
+        if include_comments and days <= 1:
+            max_comments_per_post = 5  # Daily-friendly limit
+        
+        logger.info(f"Starting Reddit Deal Intent Signals collection, days={days}, limit_per_sub={limit_per_sub}, include_comments={include_comments}, max_comments_per_post={max_comments_per_post}")
         
         # Запускаем task синхронно (выполняется в API контейнере)
-        result = collect_deal_intent_signals_reddit_task(days=days, limit_per_sub=limit_per_sub, include_comments=include_comments)
+        result = collect_deal_intent_signals_reddit_task(
+            days=days, 
+            limit_per_sub=limit_per_sub, 
+            include_comments=include_comments,
+            max_comments_per_post=max_comments_per_post
+        )
         
         return {
             "status": "ok",
@@ -2622,6 +2730,125 @@ async def collect_steam_reviews_signals(
     except Exception as e:
         logger.error(f"Failed to collect Steam Reviews signals: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/signals/collect_discord")
+async def collect_discord_signals(
+    days: int = Query(1, ge=1, description="Количество дней назад для поиска сообщений (Daily Publisher Hunt: по умолчанию 1, максимум 7)"),
+    debug: bool = Query(False, description="Включить debug mode (показывает channels_visible, channels_ranked, sample_messages)"),
+    test_inject: bool = Query(False, description="Калибровочный тест: создает виртуальное сообщение для проверки сохранения"),
+    max_channels: int = Query(5, ge=1, le=20, description="Максимум каналов для auto-pick (по умолчанию 5)"),
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """
+    Запустить сбор Deal Intent Signals из Discord (Publisher Hunt v1).
+    Daily scan для поиска проектов, ищущих издателя.
+    """
+    import os
+    
+    # A1. Validation: days max=7
+    if days > 7:
+        return {
+            "status": "error",
+            "error": "VALIDATION_ERROR",
+            "details": {"days": "max 7"},
+            "result": {
+                "status": "error",
+                "messages_scanned": 0,
+                "messages_matched": 0,
+                "signals_saved": 0,
+                "app_ids_discovered": 0,
+                "rate_limited": False,
+                "errors": [f"days parameter must be <= 7, got {days}"],
+                "channels_scanned": 0,
+                "channels_visible": [],
+                "channels_ranked": [],
+                "sample_messages": [],
+                "match_reasons": [],
+                "discord_api_status_codes": {},
+                "content_empty_reason_guess": "",
+                "non_system_messages_seen": 0,
+                "latest_non_system_message_id": None,
+                "latest_non_system_message_preview": "",
+                "latest_non_system_message_has_links": False,
+                "latest_non_system_message_urls": [],
+                "action_required": ""
+            }
+        }
+    
+    try:
+        # Импортируем функцию напрямую (не celery task)
+        from apps.worker.tasks.collect_discord_signals import collect_discord_signals_task
+        
+        logger.info(f"Starting Discord Publisher Hunt Signals collection, days={days}, debug={debug}, test_inject={test_inject}, max_channels={max_channels}")
+        
+        # Вызываем функцию напрямую (синхронно, в API контейнере)
+        result = collect_discord_signals_task(days=days, debug=debug, test_inject=test_inject, max_channels=max_channels)
+        
+        # Проверяем, что результат не None
+        if result is None:
+            logger.error("collect_discord_signals_task returned None")
+            return {
+                "status": "error",
+                "error": "DISCORD_TASK_FAILED",
+                "details": "Task returned None"
+            }
+        
+        # Убеждаемся, что все обязательные поля присутствуют
+        if not isinstance(result, dict):
+            logger.error(f"collect_discord_signals_task returned non-dict: {type(result)}")
+            return {
+                "status": "error",
+                "error": "DISCORD_TASK_FAILED",
+                "details": f"Task returned invalid type: {type(result)}"
+            }
+        
+        # Заполняем обязательные поля, если их нет
+        default_result = {
+            "status": "ok",
+            "messages_scanned": 0,
+            "messages_matched": 0,
+            "signals_saved": 0,
+            "app_ids_discovered": 0,
+            "rate_limited": False,
+            "errors": [],
+            "channels_scanned": 0,
+            "channels_visible": [],
+            "channels_ranked": [],
+            "sample_messages": [],
+            "match_reasons": [],
+            "discord_api_status_codes": {},
+            "content_empty_reason_guess": "",
+            "non_system_messages_seen": 0,
+            "latest_non_system_message_id": None,
+            "latest_non_system_message_preview": "",
+            "latest_non_system_message_has_links": False,
+            "latest_non_system_message_urls": [],
+            "action_required": ""
+        }
+        
+        # Объединяем с дефолтами (приоритет у результата)
+        final_result = {**default_result, **result}
+        
+        return {
+            "status": "ok",
+            "result": final_result
+        }
+        
+    except ImportError as e:
+        logger.error(f"Failed to import collect_discord_signals_task: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": "WORKER_NOT_AVAILABLE",
+            "details": f"Could not import task: {str(e)}"
+        }
+    except Exception as e:
+        logger.error(f"Failed to collect Discord signals: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": "DISCORD_TASK_FAILED",
+            "details": str(e)
+        }
 
 
 @router.post("/signals/collect_youtube")
@@ -2779,3 +3006,70 @@ def _recalculate_deal_intent(db: Session, app_id: int):
     )
     
     db.commit()
+
+
+
+@router.post("/metadata/enrich_from_recent_signals")
+async def enrich_from_recent_signals(
+    days: int = Query(7, ge=1, le=30, description="Количество дней назад для поиска сигналов (C2: по умолчанию 7)"),
+    limit: int = Query(200, ge=1, le=500, description="Максимум app_id для обогащения (C2: по умолчанию 200)"),
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """
+    C2: Обогатить метаданные ТОЛЬКО для app_id, обнаруженных через свежие сигналы.
+    Берет app_id из deal_intent_signal за последние N дней и обогащает через Steam API.
+    """
+    try:
+        from apps.worker.tasks.enrich_deal_metadata import enrich_from_recent_signals_task
+        
+        logger.info(f"Starting metadata enrichment from recent signals (C2), days={days}, limit={limit}")
+        
+        # Запускаем task синхронно (выполняется в API контейнере)
+        result = enrich_from_recent_signals_task(days=days, limit=limit)
+        
+        # Проверяем формат результата
+        if isinstance(result, dict) and "result" in result:
+            return {
+                "status": "ok",
+                "result": result["result"]
+            }
+        elif isinstance(result, dict) and "status" in result:
+            # Если task вернул уже полный формат
+            return result
+        else:
+            # Fallback
+            return {
+                "status": "ok",
+                "result": result if isinstance(result, dict) else {}
+            }
+        
+    except Exception as e:
+        logger.error(f"Failed to enrich from recent signals: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/metadata/enrich_missing")
+async def enrich_missing_metadata(
+    limit: int = Query(200, ge=1, le=500, description="Максимум app_id для обогащения"),
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """
+    Обогатить метаданные для app_id без title/steam_url.
+    Находит app_id из deal_intent_game/deal_intent_signal и обогащает через Steam API.
+    """
+    try:
+        from apps.worker.tasks.enrich_deal_metadata import enrich_missing_metadata_task
+        
+        logger.info(f"Starting metadata enrichment for up to {limit} app_ids")
+        
+        # Запускаем task синхронно (выполняется в API контейнере)
+        result = enrich_missing_metadata_task(limit=limit)
+        
+        return {
+            "status": "ok",
+            "result": result.get("result", {})
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to enrich metadata: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

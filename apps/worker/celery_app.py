@@ -55,3 +55,13 @@ def worker_shutting_down_handler(sender=None, **kwargs):
 # Relaunch tasks
 from apps.worker.tasks.collect_relaunch_steam import collect_relaunch_steam_task  # noqa: F401,E402
 from apps.worker.tasks.compute_relaunch_scores import compute_relaunch_scores_task  # noqa: F401,E402
+
+# Deal Intent tasks
+from apps.worker.tasks.collect_deal_intent_signals_reddit import collect_deal_intent_signals_reddit_task  # noqa: F401,E402
+from apps.worker.tasks.collect_discord_signals import collect_discord_signals_task  # noqa: F401,E402
+
+# Discord Discovery tasks
+from apps.worker.tasks.discover_discord_invites import discover_discord_invites_task  # noqa: F401,E402
+from apps.worker.tasks.resolve_discord_invite import resolve_discord_invite_task  # noqa: F401,E402
+from apps.worker.tasks.rank_discord_candidates import rank_discord_candidates_task  # noqa: F401,E402
+from apps.worker.tasks.sync_guild_channels import sync_guild_channels_task  # noqa: F401,E402

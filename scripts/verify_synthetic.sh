@@ -511,7 +511,7 @@ for test_app_id in 1410400 999999; do
 done
 echo
 
-echo "S13. Проверка signal coverage после seed (Vector #4)..."
+echo "S12a. Проверка signal coverage после seed (Vector #4)..."
 echo "  Запуск seed_more_signals.sh..."
 if bash scripts/seed_more_signals.sh > /tmp/seed_output.log 2>&1; then
   echo "  ✅ PASS: seed_more_signals.sh выполнен успешно"
@@ -533,6 +533,44 @@ else
   echo "  ❌ FAIL: seed_more_signals.sh завершился с ошибкой"
   cat /tmp/seed_output.log
   fail=1
+fi
+echo
+
+# S13. Контракт /list: count > 0 при min_intent_score=0&min_quality_score=0 (Stability Gate)
+# Согласно TZ_SYSTEM_GOVERNANCE_MASTER.md п.2.3: минимальный смысловой контракт
+# Stability Gate секция (S1-S12, включая контрактные проверки)
+echo "S13. Контракт /list: count > 0 при min_intent_score=0&min_quality_score=0 (Stability Gate)..."
+LIST_RESPONSE=$(fetch_list "$API_BASE/api/v1/deals/list?limit=50&min_intent_score=0&min_quality_score=0")
+LIST_COUNT=$(echo "${LIST_RESPONSE}" | jq -r '.count // 0' 2>/dev/null || echo "0")
+LIST_STATUS=$(echo "${LIST_RESPONSE}" | jq -r '.status // "error"' 2>/dev/null || echo "error")
+EXCLUDED_REASONS=$(echo "${LIST_RESPONSE}" | jq -r '.excluded_reasons // {}' 2>/dev/null || echo "{}")
+EXCLUDED=$(echo "${LIST_RESPONSE}" | jq -r '.excluded // {}' 2>/dev/null || echo "{}")
+echo "  status = ${LIST_STATUS}, count = ${LIST_COUNT}"
+if [ "${LIST_STATUS}" != "ok" ]; then
+  echo "  ❌ FAIL: /list status = ${LIST_STATUS} (регрессия API)"
+  fail=1
+elif [ "${LIST_COUNT}" -gt 0 ]; then
+  echo "  ✅ PASS: /list count = ${LIST_COUNT} > 0 (минимальный смысловой контракт соблюден)"
+else
+  echo "  ❌ FAIL: /list count = 0 при min_intent_score=0&min_quality_score=0 (регрессия gates/filters)"
+  echo "  excluded_reasons: ${EXCLUDED_REASONS}"
+  echo "  excluded: ${EXCLUDED}"
+  echo "  Диагностика: все игры исключены gates/filters, требуется анализ причин"
+  fail=1
+fi
+echo
+
+# S14. apps_with_signals (Progress Gate - НЕ блокирует merge)
+# Согласно TZ_SYSTEM_GOVERNANCE_MASTER.md Mode B: Progress Gate (S13+)
+# Progress Gate секция: метрики прогресса, не влияют на exit code
+echo "S14. Проверка apps_with_signals (Progress Gate - отчет, не блокирует merge)..."
+APPS_WITH_SIGNALS=$(psql_db "SELECT COUNT(DISTINCT app_id) FROM deal_intent_signal WHERE app_id IS NOT NULL;")
+echo "  apps_with_signals = ${APPS_WITH_SIGNALS} / 100"
+if [[ "${APPS_WITH_SIGNALS}" -ge 100 ]]; then
+  echo "  ✅ Progress Gate PASS: apps_with_signals >= 100"
+else
+  echo "  ⚠️  Progress Gate FAIL: apps_with_signals = ${APPS_WITH_SIGNALS} (< 100) - не блокирует merge"
+  # НЕ устанавливаем fail=1, так как это Progress Gate (S13+), не Stability Gate
 fi
 echo
 

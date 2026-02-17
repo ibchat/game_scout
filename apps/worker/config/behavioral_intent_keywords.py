@@ -11,21 +11,25 @@ from typing import Dict, List
 
 PRIMARY_KEYWORDS: Dict[str, int] = {
     "looking for a publisher": 5,
+    "looking for publisher": 5,  # Без артикля (согласно ТЗ п.4.2.A)
     "seeking publisher": 5,
     "need a publisher": 5,
+    "need publisher": 5,  # Без артикля (согласно ТЗ п.4.2.A)
     "publisher wanted": 5,
     "looking for publishing partner": 5,
     "seeking funding": 5,
-    "need funding": 5,
+    "need funding": 5,  # Согласно ТЗ п.4.2.A
     "looking for funding": 5,
     "pitch deck": 4,
     "investor deck": 4,
     "publishing deal": 4,
     "we are looking for": 4,
-    "need marketing help": 4,
+    "need marketing help": 4,  # Согласно ТЗ п.4.2.A
+    "marketing help": 4,  # Согласно ТЗ п.4.2.A
     "seeking marketing": 4,
     "looking for marketing": 4,
     "need marketing support": 4,
+    "publisher help": 4,  # Согласно ТЗ п.4.2.A
     "publisher needed": 5,
     "seeking investors": 5,
     "investment wanted": 5,
@@ -43,6 +47,7 @@ PRIMARY_KEYWORDS: Dict[str, int] = {
 
 SECONDARY_KEYWORDS: Dict[str, int] = {
     "wishlist": 2,
+    "wishlists low": 2,  # Согласно ТЗ п.4.2.A
     "steam page is live": 2,
     "demo available": 2,
     "next fest": 2,
@@ -50,7 +55,15 @@ SECONDARY_KEYWORDS: Dict[str, int] = {
     "steam festival": 2,
     "coming soon": 1,
     "early access": 1,
-    "launching soon": 1
+    "early access failed": 3,  # Согласно ТЗ п.4.2.A
+    "launching soon": 1,
+    # Дополнительные keywords согласно TZ_SIGNAL_INGESTION_VECTOR_A_EXEC_V1.md п.4.2.A
+    "launch failed": 3,
+    "no visibility": 3,
+    "poor sales": 3,  # Согласно ТЗ п.4.2.A
+    "low sales": 3,
+    "wishlist low": 2,
+    "help promote": 2
 }
 
 # ============================================================================

@@ -1,8 +1,10 @@
 """
-YouTube Collector for Deal Intent Signals v3.2
+YouTube Collector for Deal Intent Signals Vector B EXEC v1
 Использует существующие ExternalVideo и ExternalCommentSample для матчинга keywords.
+Согласно TZ_SIGNAL_INGESTION_VECTOR_B_EXEC_V1.md
 """
 import re
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
@@ -14,8 +16,6 @@ from apps.db.models_investor import ExternalVideo, ExternalCommentSample
 from apps.worker.config.behavioral_intent_keywords import BEHAVIORAL_KEYWORDS
 from apps.worker.tasks.collect_deal_intent_signals_reddit import (
     extract_steam_app_ids,
-    extract_links,
-    detect_language,
     match_keywords
 )
 
@@ -23,20 +23,28 @@ logger = logging.getLogger(__name__)
 
 
 @celery_app.task(name="apps.worker.tasks.collect_deal_intent_signals_youtube.collect_deal_intent_signals_youtube_task")
-def collect_deal_intent_signals_youtube_task(days: int = 30) -> Dict[str, Any]:
+def collect_deal_intent_signals_youtube_task(days: int = 365) -> Dict[str, Any]:
     """
-    Собирает Deal Intent Signals из существующих YouTube данных.
-    Анализирует ExternalVideo (title, description) и ExternalCommentSample (comments).
+    Собирает Deal Intent Signals из существующих YouTube данных (Vector B EXEC v1).
+    Анализирует ExternalVideo (title) и ExternalCommentSample (comments).
+    
+    Согласно TZ_SIGNAL_INGESTION_VECTOR_B_EXEC_V1.md:
+    - Только существующие таблицы (external_videos, external_comment_samples)
+    - Строгая фильтрация app_id (только Steam links)
+    - Идемпотентность через ON CONFLICT (source, url)
+    - Только существующие колонки в deal_intent_signal
     
     Args:
-        days: Количество дней назад для поиска видео (по умолчанию 30)
+        days: Количество дней назад для поиска видео (по умолчанию 365 для максимального покрытия)
     
     Returns:
         {
             "status": "ok",
             "videos_processed": int,
+            "comments_processed": int,
             "signals_saved": int,
             "signals_with_app_id": int,
+            "signals_skipped": int,
             "errors": List[str]
         }
     """
@@ -44,6 +52,7 @@ def collect_deal_intent_signals_youtube_task(days: int = 30) -> Dict[str, Any]:
     results = {
         "status": "ok",
         "videos_processed": 0,
+        "comments_processed": 0,
         "signals_saved": 0,
         "signals_with_app_id": 0,
         "signals_skipped": 0,
@@ -51,62 +60,58 @@ def collect_deal_intent_signals_youtube_task(days: int = 30) -> Dict[str, Any]:
     }
     
     try:
-        # Получаем YouTube видео за последние N дней
-        cutoff_date = datetime.utcnow() - timedelta(days=days)
-        
+        # Получаем ВСЕ YouTube видео (без ограничения по дате для максимального покрытия)
+        # Согласно ТЗ: использовать все существующие данные
         stmt = select(ExternalVideo).where(
-            ExternalVideo.platform == 'youtube',
-            ExternalVideo.published_at >= cutoff_date
-        ).order_by(ExternalVideo.published_at.desc()).limit(200)  # Ограничиваем для MVP
+            ExternalVideo.platform == 'youtube'
+        ).order_by(ExternalVideo.published_at.desc() if ExternalVideo.published_at else ExternalVideo.collected_at.desc())
         
         videos = db.execute(stmt).scalars().all()
         results["videos_processed"] = len(videos)
         
-        logger.info(f"Processing {len(videos)} YouTube videos for Deal Intent Signals")
+        logger.info(f"Processing {len(videos)} YouTube videos for Deal Intent Signals (Vector B)")
         
+        # Обрабатываем видео-level сигналы
         for video in videos:
             try:
-                # Объединяем title и description для анализа
-                video_text = f"{video.title or ''} {getattr(video, 'description', '') or ''}"
+                # Video-level: анализируем title
+                video_text = video.title or ''
                 
-                # Получаем комментарии для этого видео
-                comments_stmt = select(ExternalCommentSample).where(
-                    ExternalCommentSample.video_id == video.id
-                ).limit(50)  # Берем первые 50 комментариев
-                
-                comments = db.execute(comments_stmt).scalars().all()
-                comments_text = " ".join([c.comment_text or '' for c in comments[:20]])  # Первые 20 комментариев
-                
-                # Объединяем текст видео и комментариев
-                full_text = f"{video_text} {comments_text}"
-                
-                if not full_text.strip():
+                if not video_text.strip():
                     continue
                 
-                # Матчим keywords
-                keyword_result = match_keywords(full_text)
+                # Матчим keywords в title
+                keyword_result = match_keywords(video_text)
                 matched_keywords = keyword_result["matched_keywords"]
                 intent_strength = keyword_result["intent_strength"]
                 
                 # Если нет keywords - пропускаем
                 if not matched_keywords or intent_strength == 0:
+                    continue
+                
+                # Извлекаем Steam app_id СТРОГО (только из Steam links)
+                # Ищем в title и url
+                search_text = f"{video_text} {video.url or ''}"
+                extracted_app_ids = extract_steam_app_ids(search_text, video.url or '')
+                
+                # Согласно ТЗ п.4: нет app_id → нет сигнала
+                if not extracted_app_ids:
                     results["signals_skipped"] += 1
                     continue
                 
-                # Извлекаем Steam app_id из video URL, title, description, комментариев
-                extracted_app_ids = extract_steam_app_ids(full_text, video.url or '')
+                # Берем первый app_id
+                app_id = extracted_app_ids[0]
                 
-                # Извлекаем ссылки
-                extracted_links = extract_links(full_text, video.url or '')
+                # Определяем signal_type
+                signal_type = "behavioral_intent" if intent_strength >= 4 else "intent_keyword"
                 
-                # Определяем язык
-                lang = detect_language(full_text)
+                # Создаем snippet (≤ 280 символов согласно ТЗ п.7)
+                snippet = video_text[:280]
                 
-                # Определяем app_id (если нашли один) или title_guess
-                app_id = extracted_app_ids[0] if extracted_app_ids else None
-                title_guess = video.title[:200] if not app_id else None
+                # Используем published_at или collected_at
+                published_at = video.published_at or video.collected_at or datetime.utcnow()
                 
-                # Проверяем, не существует ли уже такой сигнал (по source + url)
+                # Проверяем существование сигнала (идемпотентность)
                 existing_check = db.execute(
                     text("SELECT id FROM deal_intent_signal WHERE source = 'youtube' AND url = :url"),
                     {"url": video.url or ''}
@@ -116,45 +121,30 @@ def collect_deal_intent_signals_youtube_task(days: int = 30) -> Dict[str, Any]:
                     results["signals_skipped"] += 1
                     continue
                 
-                # Используем published_at как ts
-                ts = video.published_at or datetime.utcnow()
-                
-                # Сохраняем сигнал
+                # Вставляем сигнал
                 db.execute(
                     text("""
                         INSERT INTO deal_intent_signal (
-                            app_id, source, url, text, author, ts,
-                            matched_keywords, intent_strength, extracted_steam_app_ids,
-                            extracted_links, lang, title_guess, published_at, created_at
+                            app_id, source, url, text, signal_type, published_at, created_at
                         ) VALUES (
-                            :app_id, 'youtube', :url, :text, :author, :ts,
-                            CAST(:matched_keywords AS jsonb), :intent_strength, 
-                            CAST(:extracted_app_ids AS integer[]),
-                            CAST(:extracted_links AS jsonb), :lang, :title_guess, :ts, NOW()
+                            :app_id, 'youtube', :url, :text, :signal_type, :published_at, NOW()
                         )
                     """),
                     {
                         "app_id": app_id,
                         "url": video.url or '',
-                        "text": full_text[:5000],  # Ограничиваем длину
-                        "author": getattr(video, 'channel_name', None) or 'youtube',
-                        "ts": ts,
-                        "matched_keywords": matched_keywords,
-                        "intent_strength": intent_strength,
-                        "extracted_app_ids": extracted_app_ids,
-                        "extracted_links": extracted_links,
-                        "lang": lang,
-                        "title_guess": title_guess
+                        "text": snippet,
+                        "signal_type": signal_type,
+                        "published_at": published_at
                     }
                 )
                 
                 db.commit()
                 
                 results["signals_saved"] += 1
-                if app_id:
-                    results["signals_with_app_id"] += 1
+                results["signals_with_app_id"] += 1
                 
-                logger.debug(f"Saved YouTube signal: {video.url}, app_id={app_id}, keywords={len(matched_keywords)}")
+                logger.debug(f"Saved YouTube video signal: {video.url}, app_id={app_id}")
                 
             except Exception as e:
                 error_msg = f"Error processing video {video.url or 'unknown'}: {str(e)}"
@@ -163,10 +153,105 @@ def collect_deal_intent_signals_youtube_task(days: int = 30) -> Dict[str, Any]:
                 db.rollback()
                 continue
         
+        # Обрабатываем comment-level сигналы
+        comments_stmt = select(ExternalCommentSample)
+        comments = db.execute(comments_stmt).scalars().all()
+        results["comments_processed"] = len(comments)
+        
+        logger.info(f"Processing {len(comments)} YouTube comments for Deal Intent Signals")
+        
+        for comment in comments:
+            try:
+                comment_text = comment.comment_text or ''
+                
+                if not comment_text.strip():
+                    continue
+                
+                # Матчим keywords в комментарии
+                keyword_result = match_keywords(comment_text)
+                matched_keywords = keyword_result["matched_keywords"]
+                intent_strength = keyword_result["intent_strength"]
+                
+                # Если нет keywords - пропускаем
+                if not matched_keywords or intent_strength == 0:
+                    continue
+                
+                # Получаем связанное видео для извлечения app_id
+                video_stmt = select(ExternalVideo).where(ExternalVideo.id == comment.video_id)
+                video = db.execute(video_stmt).scalar_one_or_none()
+                
+                if not video:
+                    continue
+                
+                # Извлекаем Steam app_id из комментария и связанного видео
+                search_text = f"{comment_text} {video.title or ''} {video.url or ''}"
+                extracted_app_ids = extract_steam_app_ids(search_text, video.url or '')
+                
+                # Согласно ТЗ п.4: нет app_id → нет сигнала
+                if not extracted_app_ids:
+                    results["signals_skipped"] += 1
+                    continue
+                
+                app_id = extracted_app_ids[0]
+                
+                # Определяем signal_type
+                signal_type = "behavioral_intent" if intent_strength >= 4 else "intent_keyword"
+                
+                # Создаем snippet (≤ 280 символов)
+                snippet = comment_text[:280]
+                
+                # Используем published_at комментария или видео
+                published_at = comment.published_at or video.published_at or video.collected_at or datetime.utcnow()
+                
+                # URL для комментария: используем URL видео (комментарии не имеют отдельного URL)
+                comment_url = f"{video.url}#comment-{comment.id}"
+                
+                # Проверяем существование сигнала (идемпотентность)
+                existing_check = db.execute(
+                    text("SELECT id FROM deal_intent_signal WHERE source = 'youtube' AND url = :url"),
+                    {"url": comment_url}
+                ).scalar()
+                
+                if existing_check:
+                    results["signals_skipped"] += 1
+                    continue
+                
+                # Вставляем сигнал
+                db.execute(
+                    text("""
+                        INSERT INTO deal_intent_signal (
+                            app_id, source, url, text, signal_type, published_at, created_at
+                        ) VALUES (
+                            :app_id, 'youtube', :url, :text, :signal_type, :published_at, NOW()
+                        )
+                    """),
+                    {
+                        "app_id": app_id,
+                        "url": comment_url,
+                        "text": snippet,
+                        "signal_type": signal_type,
+                        "published_at": published_at
+                    }
+                )
+                
+                db.commit()
+                
+                results["signals_saved"] += 1
+                results["signals_with_app_id"] += 1
+                
+                logger.debug(f"Saved YouTube comment signal: app_id={app_id}")
+                
+            except Exception as e:
+                error_msg = f"Error processing comment {comment.id}: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                results["errors"].append(error_msg)
+                db.rollback()
+                continue
+        
         logger.info(
-            f"YouTube Deal Intent Signals: processed={results['videos_processed']}, "
-            f"saved={results['signals_saved']}, with_app_id={results['signals_with_app_id']}, "
-            f"skipped={results['signals_skipped']}"
+            f"YouTube Deal Intent Signals (Vector B): videos={results['videos_processed']}, "
+            f"comments={results['comments_processed']}, saved={results['signals_saved']}, "
+            f"with_app_id={results['signals_with_app_id']}, skipped={results['signals_skipped']}"
         )
         
         return results

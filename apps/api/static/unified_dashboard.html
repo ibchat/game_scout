@@ -307,6 +307,14 @@
             display: block;
         }
 
+        .voy-subtab-content {
+            display: none;
+        }
+
+        .voy-subtab-content.active {
+            display: block;
+        }
+
         .alert {
             padding: 16px;
             border-radius: 8px;
@@ -410,9 +418,10 @@
         </div>
 
         <div class="tabs">
-            <div class="tab active" onclick="switchTab('analytics')">📊 Аналитика</div>
-            <div class="tab" onclick="switchTab('games')">🎮 База Игр</div>
-            <div class="tab" onclick="switchTab('pitches')">💡 Оценка Питчей</div>
+            <div class="tab active" onclick="switchTab('analytics', this)">📊 Аналитика</div>
+            <div class="tab" onclick="switchTab('games', this)">🎮 База Игр</div>
+            <div class="tab" onclick="switchTab('pitches', this)">💡 Оценка Питчей</div>
+            <div class="tab" id="voy-tab-button" onclick="switchTab('voy', this)" style="display: none;">🚀 VOY</div>
         </div>
 
         <div id="alert-container"></div>
@@ -472,6 +481,185 @@
                 <p style="color: var(--text-secondary); margin-top: 10px;">Скоро - Отправьте свой питч для AI-анализа</p>
             </div>
         </div>
+
+        <!-- VOY Tab -->
+        <div id="voy-tab" class="tab-content">
+            <div class="games-container">
+                <div class="games-header">
+                    <h2>🚀 VOY Scout</h2>
+                </div>
+                
+                <!-- VOY Sub-tabs -->
+                <div class="tabs" style="margin-bottom: 20px; border-bottom: 2px solid var(--stroke);">
+                    <div class="tab active" onclick="switchVoySubTab('runs', this)" style="padding: 10px 20px;">Запуски</div>
+                    <div class="tab" onclick="switchVoySubTab('methodology', this)" style="padding: 10px 20px;">📋 Методология</div>
+                    <div class="tab" onclick="switchVoySubTab('learning', this)" style="padding: 10px 20px;">⚙️ Обучение</div>
+                    <div class="tab" onclick="switchVoySubTab('overrides', this)" style="padding: 10px 20px;">🔄 Overrides</div>
+                </div>
+
+                <!-- VOY Runs Sub-tab -->
+                <div id="voy-subtab-runs" class="voy-subtab-content">
+                    <div class="actions" style="margin-bottom: 20px;">
+                        <select id="voy-goal-select" style="padding: 8px; margin-right: 10px;">
+                            <option value="">Выберите цель...</option>
+                            <option value="publisher_hunt">Publisher Hunt</option>
+                            <option value="high_potential">High Potential</option>
+                            <option value="undermarketed">Undermarketed Gems</option>
+                        </select>
+                        <button class="btn btn-success" onclick="runVoy()">Запустить VOY</button>
+                        <button class="btn" onclick="loadVoyRuns()">↻ Обновить</button>
+                    </div>
+                <div id="voy-runs-list" style="margin-bottom: 20px;">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Загрузка запусков VOY...</p>
+                    </div>
+                </div>
+                <div id="voy-shortlist-table" style="display: none;">
+                    <h3>Shortlist</h3>
+                    <table class="games-table" style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>Ранг</th>
+                                <th>Game ID</th>
+                                <th>Название</th>
+                                <th>Оценка</th>
+                                <th>Объяснение</th>
+                                <th>Обратная связь</th>
+                            </tr>
+                        </thead>
+                        <tbody id="voy-shortlist-tbody">
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- VOY Methodology Sub-tab -->
+                <div id="voy-subtab-methodology" class="voy-subtab-content" style="display: none;">
+                    <div style="padding: 20px; background: var(--graphite-medium); border-radius: 8px; border: 2px solid var(--accent-blue);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3 style="color: var(--accent-blue);">📋 Методология Bonfire</h3>
+                            <span style="color: var(--text-secondary); font-size: 0.9rem;">Версия: <span id="voy-methodology-version">-</span></span>
+                        </div>
+                        <div style="background: var(--graphite-dark); padding: 20px; border-radius: 8px; border-left: 4px solid var(--accent-blue);">
+                            <div id="voy-methodology-content" style="white-space: pre-wrap; line-height: 1.8; color: var(--text-primary);">
+                                <div class="loading">
+                                    <div class="spinner"></div>
+                                    <p>Загрузка методологии...</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 15px; padding: 10px; background: rgba(74, 158, 255, 0.1); border-radius: 4px; border: 1px solid var(--accent-blue);">
+                            <p style="color: var(--accent-blue); font-size: 0.9rem; margin: 0;">
+                                ⚠️ <strong>Нормативный документ (read-only)</strong> — Методология не может быть изменена системой, GPT или автоматически.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- VOY Learning Sub-tab -->
+                <div id="voy-subtab-learning" class="voy-subtab-content" style="display: none;">
+                <!-- Learning Settings -->
+                <div id="voy-learning-settings" style="margin-top: 30px; padding: 20px; border: 1px solid var(--stroke); border-radius: 8px;">
+                    <h3>Настройки Обучения</h3>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;">
+                        <div>
+                            <label style="display: flex; align-items: center; margin-bottom: 10px;">
+                                <input type="checkbox" id="voy-learning-enabled" style="margin-right: 8px;">
+                                Обучение включено
+                            </label>
+                            <label style="display: block; margin-bottom: 10px;">
+                                Скорость обучения:
+                                <input type="number" id="voy-learning-rate" step="0.01" min="0.01" max="0.5" style="width: 100px; margin-left: 10px;">
+                            </label>
+                            <label style="display: block; margin-bottom: 10px;">
+                                Макс. изменение веса:
+                                <input type="number" id="voy-max-weight-delta" step="0.01" min="0.01" max="0.5" style="width: 100px; margin-left: 10px;">
+                            </label>
+                            <label style="display: block; margin-bottom: 10px;">
+                                Мин. количество feedback:
+                                <input type="number" id="voy-min-feedback-count" min="1" max="100" style="width: 100px; margin-left: 10px;">
+                            </label>
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 10px;">
+                                Мин. вес skill:
+                                <input type="number" id="voy-min-skill-weight" step="0.1" min="0.1" max="1.0" style="width: 100px; margin-left: 10px;">
+                            </label>
+                            <label style="display: block; margin-bottom: 10px;">
+                                Макс. вес skill:
+                                <input type="number" id="voy-max-skill-weight" step="0.1" min="1.0" max="5.0" style="width: 100px; margin-left: 10px;">
+                            </label>
+                            <label style="display: block; margin-bottom: 10px;">
+                                Замороженные skills (через запятую):
+                                <input type="text" id="voy-frozen-skills" placeholder="skill1, skill2" style="width: 200px; margin-left: 10px;">
+                            </label>
+                            <label style="display: flex; align-items: center; margin-top: 10px;">
+                                <input type="checkbox" id="voy-allow-gpt-advice" style="margin-right: 8px;">
+                                Разрешить GPT советы
+                            </label>
+                        </div>
+                    </div>
+                    <button class="btn btn-success" onclick="saveVoyLearningConfig()" style="margin-top: 15px;">Сохранить</button>
+                </div>
+
+                <!-- Learning Log -->
+                <div id="voy-learning-log" style="margin-top: 30px;">
+                    <h3>Журнал Обучения</h3>
+                    <div style="margin-bottom: 10px;">
+                        <select id="voy-log-filter-skill" style="padding: 5px; margin-right: 10px;">
+                            <option value="">Все skills</option>
+                        </select>
+                        <select id="voy-log-filter-source" style="padding: 5px; margin-right: 10px;">
+                            <option value="">Все источники</option>
+                            <option value="feedback">Feedback</option>
+                            <option value="gpt_advice">GPT Advice</option>
+                        </select>
+                        <button class="btn" onclick="loadVoyLearningLog()">↻ Обновить</button>
+                    </div>
+                    <table class="games-table" style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>Skill</th>
+                                <th>Старый → Новый</th>
+                                <th>Изменение</th>
+                                <th>Источник</th>
+                                <th>Причина</th>
+                                <th>Время</th>
+                            </tr>
+                        </thead>
+                        <tbody id="voy-learning-log-tbody">
+                            <tr><td colspan="6">Загрузка...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                </div>
+
+                <!-- VOY Overrides Sub-tab -->
+                <div id="voy-subtab-overrides" class="voy-subtab-content" style="display: none;">
+                    <div style="margin-bottom: 20px;">
+                        <h3>🔄 Overrides (Переопределения Решений)</h3>
+                        <p style="color: var(--text-secondary); margin-top: 10px;">
+                            Записи о случаях, когда инвестор переопределил решение системы.
+                        </p>
+                        <button class="btn" onclick="loadVoyOverrides()" style="margin-top: 10px;">↻ Обновить</button>
+                    </div>
+                    <table class="games-table" style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>Дата</th>
+                                <th>Run Item</th>
+                                <th>Рекомендация системы</th>
+                                <th>Решение инвестора</th>
+                                <th>Причина</th>
+                            </tr>
+                        </thead>
+                        <tbody id="voy-overrides-tbody">
+                            <tr><td colspan="5">Загрузка...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Game Details Modal -->
@@ -494,18 +682,296 @@
         let allGames = [];
         let allGamesData = [];
 
-        function switchTab(tabName) {
+        function switchTab(tabName, clickedElement) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             
-            event.target.classList.add('active');
+            // Find and activate the clicked tab
+            if (clickedElement) {
+                clickedElement.classList.add('active');
+            } else {
+                // Fallback: find tab by text content
+                document.querySelectorAll('.tab').forEach(tab => {
+                    if (tab.textContent.includes(tabName === 'analytics' ? 'Аналитика' : 
+                                                 tabName === 'games' ? 'База Игр' : 
+                                                 tabName === 'pitches' ? 'Питчей' : 
+                                                 tabName === 'voy' ? 'VOY' : '')) {
+                        tab.classList.add('active');
+                    }
+                });
+            }
+            
             document.getElementById(tabName + '-tab').classList.add('active');
 
             if (tabName === 'analytics') {
                 loadAnalytics();
             } else if (tabName === 'games') {
                 loadAllGames();
+            } else if (tabName === 'voy') {
+                checkVoyEnabled();
+                switchVoySubTab('runs');
             }
+        }
+
+        function switchVoySubTab(subTabName, clickedElement) {
+            // Hide all sub-tabs
+            document.querySelectorAll('.voy-subtab-content').forEach(tab => {
+                tab.style.display = 'none';
+            });
+            
+            // Remove active class from all sub-tab buttons
+            document.querySelectorAll('#voy-tab .tab').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected sub-tab
+            const subTabContent = document.getElementById(`voy-subtab-${subTabName}`);
+            if (subTabContent) {
+                subTabContent.style.display = 'block';
+            }
+            
+            // Activate clicked button
+            if (clickedElement) {
+                clickedElement.classList.add('active');
+            }
+            
+            // Load content for sub-tab
+            if (subTabName === 'runs') {
+                loadVoyRuns();
+            } else if (subTabName === 'methodology') {
+                loadVoyMethodology();
+            } else if (subTabName === 'learning') {
+                loadVoyLearningConfig();
+                loadVoyLearningLog();
+            } else if (subTabName === 'overrides') {
+                loadVoyOverrides();
+            }
+        }
+
+        async function checkVoyEnabled() {
+            try {
+                const response = await fetch('/api/v1/voy/health');
+                const data = await response.json();
+                if (data.enabled) {
+                    document.getElementById('voy-tab-button').style.display = 'block';
+                } else {
+                    document.getElementById('voy-tab-button').style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Error checking VOY status:', error);
+                document.getElementById('voy-tab-button').style.display = 'none';
+            }
+        }
+
+        async function runVoy() {
+            const goal = document.getElementById('voy-goal-select').value;
+            if (!goal) {
+                showAlert('Пожалуйста, выберите цель', 'error');
+                return;
+            }
+
+            try {
+                showAlert('Создание запуска VOY...', 'info');
+                const createResponse = await fetch('/api/v1/voy/runs', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({goal: goal})
+                });
+                const run = await createResponse.json();
+                
+                showAlert('Выполнение запуска VOY...', 'info');
+                const executeResponse = await fetch(`/api/v1/voy/runs/${run.id}/execute?shortlist_size=10`, {
+                    method: 'POST'
+                });
+                const completedRun = await executeResponse.json();
+                
+                showAlert('Запуск VOY завершен!', 'success');
+                loadVoyRun(run.id);
+            } catch (error) {
+                console.error('Ошибка запуска VOY:', error);
+                showAlert('Ошибка запуска VOY: ' + error.message, 'error');
+            }
+        }
+
+        async function loadVoyRuns() {
+            try {
+                const response = await fetch('/api/v1/voy/runs?limit=10');
+                const runs = await response.json();
+                
+                const container = document.getElementById('voy-runs-list');
+                if (runs.length === 0) {
+                    container.innerHTML = '<p>Пока нет запусков VOY. Создайте первый запуск.</p>';
+                    return;
+                }
+                
+                container.innerHTML = `
+                    <h3>Последние запуски</h3>
+                    <ul style="list-style: none; padding: 0;">
+                        ${runs.map(run => `
+                            <li style="padding: 10px; margin: 5px 0; border: 1px solid var(--stroke); border-radius: 4px; cursor: pointer;" onclick="loadVoyRun('${run.id}')">
+                                <strong>${run.goal}</strong> - ${run.status} (${run.shortlist_size} элементов)
+                                <br><small>${new Date(run.created_at).toLocaleString('ru-RU')}</small>
+                            </li>
+                        `).join('')}
+                    </ul>
+                `;
+            } catch (error) {
+                console.error('Ошибка загрузки запусков VOY:', error);
+                document.getElementById('voy-runs-list').innerHTML = '<p>Ошибка загрузки запусков</p>';
+            }
+        }
+
+        async function loadVoyRun(runId) {
+            try {
+                const response = await fetch(`/api/v1/voy/runs/${runId}`);
+                const data = await response.json();
+                
+                const tbody = document.getElementById('voy-shortlist-tbody');
+                tbody.innerHTML = data.items.map(item => `
+                    <tr>
+                        <td>${item.rank || '-'}</td>
+                        <td>${item.game_id.substring(0, 8)}...</td>
+                        <td>${item.title || 'N/A'}</td>
+                        <td>${item.total_score.toFixed(2)}</td>
+                        <td>${item.explanation || '-'}</td>
+                        <td>
+                            <button onclick="submitVoyFeedback('${item.id}', 'good')" style="padding: 4px 8px; margin: 0 4px;">👍</button>
+                            <button onclick="submitVoyFeedback('${item.id}', 'bad')" style="padding: 4px 8px; margin: 0 4px;">👎</button>
+                        </td>
+                    </tr>
+                `).join('');
+                
+                document.getElementById('voy-shortlist-table').style.display = 'block';
+            } catch (error) {
+                console.error('Error loading VOY run:', error);
+                showAlert('Error loading run: ' + error.message, 'error');
+            }
+        }
+
+        async function submitVoyFeedback(runItemId, feedbackType) {
+            try {
+                const response = await fetch('/api/v1/voy/feedback', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        run_item_id: runItemId,
+                        feedback_type: feedbackType
+                    })
+                });
+                
+                if (response.ok) {
+                    showAlert(`Обратная связь отправлена (${feedbackType === 'good' ? '👍' : '👎'})`, 'success');
+                    loadVoyLearningLog(); // Refresh learning log
+                } else {
+                    const error = await response.json();
+                    showAlert('Ошибка: ' + error.detail, 'error');
+                }
+            } catch (error) {
+                console.error('Ошибка отправки обратной связи:', error);
+                showAlert('Ошибка отправки обратной связи', 'error');
+            }
+        }
+
+        async function loadVoyLearningConfig() {
+            try {
+                const response = await fetch('/api/v1/voy/learning-config');
+                const config = await response.json();
+                
+                document.getElementById('voy-learning-enabled').checked = config.learning_enabled;
+                document.getElementById('voy-learning-rate').value = config.learning_rate;
+                document.getElementById('voy-max-weight-delta').value = config.max_weight_delta;
+                document.getElementById('voy-min-skill-weight').value = config.min_skill_weight;
+                document.getElementById('voy-max-skill-weight').value = config.max_skill_weight;
+                document.getElementById('voy-min-feedback-count').value = config.min_feedback_count;
+                document.getElementById('voy-frozen-skills').value = config.frozen_skills.join(', ');
+                document.getElementById('voy-allow-gpt-advice').checked = config.allow_gpt_advice;
+            } catch (error) {
+                console.error('Error loading learning config:', error);
+                showAlert('Error loading learning config', 'error');
+            }
+        }
+
+        async function saveVoyLearningConfig() {
+            try {
+                const frozenSkillsText = document.getElementById('voy-frozen-skills').value;
+                const frozenSkills = frozenSkillsText.split(',').map(s => s.trim()).filter(s => s);
+                
+                const config = {
+                    learning_enabled: document.getElementById('voy-learning-enabled').checked,
+                    learning_rate: parseFloat(document.getElementById('voy-learning-rate').value),
+                    max_weight_delta: parseFloat(document.getElementById('voy-max-weight-delta').value),
+                    min_skill_weight: parseFloat(document.getElementById('voy-min-skill-weight').value),
+                    max_skill_weight: parseFloat(document.getElementById('voy-max-skill-weight').value),
+                    min_feedback_count: parseInt(document.getElementById('voy-min-feedback-count').value),
+                    frozen_skills: frozenSkills,
+                    allow_gpt_advice: document.getElementById('voy-allow-gpt-advice').checked
+                };
+                
+                const response = await fetch('/api/v1/voy/learning-config', {
+                    method: 'PATCH',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(config)
+                });
+                
+                if (response.ok) {
+                    showAlert('Настройки обучения сохранены', 'success');
+                } else {
+                    const error = await response.json();
+                    showAlert('Ошибка: ' + error.detail, 'error');
+                }
+            } catch (error) {
+                console.error('Ошибка сохранения настроек обучения:', error);
+                showAlert('Ошибка сохранения настроек обучения', 'error');
+            }
+        }
+
+        async function loadVoyLearningLog() {
+            try {
+                const skillFilter = document.getElementById('voy-log-filter-skill').value;
+                const sourceFilter = document.getElementById('voy-log-filter-source').value;
+                
+                let url = '/api/v1/voy/learning-log?limit=50';
+                if (skillFilter) url += `&skill_key=${skillFilter}`;
+                if (sourceFilter) url += `&source=${sourceFilter}`;
+                
+                const response = await fetch(url);
+                const logs = await response.json();
+                
+                const tbody = document.getElementById('voy-learning-log-tbody');
+                if (logs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6">Нет записей в журнале обучения</td></tr>';
+                    return;
+                }
+                
+                tbody.innerHTML = logs.map(log => `
+                    <tr>
+                        <td>${log.skill_key}</td>
+                        <td>${log.old_weight.toFixed(3)} → ${log.new_weight.toFixed(3)}</td>
+                        <td>${log.delta > 0 ? '+' : ''}${log.delta.toFixed(3)}</td>
+                        <td>${log.source === 'feedback' ? 'Feedback' : 'GPT Advice'}</td>
+                        <td>${log.reason || '-'}</td>
+                        <td>${new Date(log.created_at).toLocaleString('ru-RU')}</td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                console.error('Ошибка загрузки журнала обучения:', error);
+                document.getElementById('voy-learning-log-tbody').innerHTML = '<tr><td colspan="6">Ошибка загрузки журнала</td></tr>';
+            }
+        }
+
+        // Initialize dashboard on page load
+        function initDashboard() {
+            // Load analytics tab by default
+            loadAnalytics();
+            // Check VOY status
+            checkVoyEnabled();
+        }
+        
+        // Check VOY on page load (after DOM is ready)
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initDashboard);
+        } else {
+            initDashboard();
         }
 
         function showAlert(message, type = 'success') {

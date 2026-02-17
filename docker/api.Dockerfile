@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir poetry && \
 COPY apps ./apps
 COPY migrations ./migrations
 COPY scripts ./scripts
+COPY alembic.ini ./alembic.ini
 
 # Create exports directory
 RUN mkdir -p /data/exports

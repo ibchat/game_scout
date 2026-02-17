@@ -414,6 +414,7 @@
             <div class="tab" onclick="switchTab('games')">🎮 База Игр</div>
             <div class="tab" onclick="switchTab('trends')">🎯 Trend Radar</div>
             <div class="tab" onclick="switchTab('pitches')">💡 Оценка Питчей</div>
+            <div class="tab" id="voy-tab-button" onclick="switchTab('voy')" style="display: none;">🚀 VOY</div>
         </div>
 
         <div id="alert-container"></div>
@@ -486,6 +487,123 @@
             <div class="games-container">
                 <h2>Система Оценки Питчей</h2>
                 <p style="color: var(--text-secondary); margin-top: 10px;">Скоро - Отправьте свой питч для AI-анализа</p>
+            </div>
+        </div>
+
+        <!-- VOY Tab -->
+        <div id="voy-tab" class="tab-content">
+            <div class="games-container">
+                <div class="games-header">
+                    <h2>🚀 VOY Scout</h2>
+                    <div class="actions">
+                        <select id="voy-goal-select" style="padding: 8px; margin-right: 10px;">
+                            <option value="">Select goal...</option>
+                            <option value="publisher_hunt">Publisher Hunt</option>
+                            <option value="high_potential">High Potential</option>
+                            <option value="undermarketed">Undermarketed Gems</option>
+                        </select>
+                        <button class="btn btn-success" onclick="runVoy()">Run VOY</button>
+                        <button class="btn" onclick="loadVoyRuns()">↻ Refresh</button>
+                    </div>
+                </div>
+                <div id="voy-runs-list" style="margin-bottom: 20px;">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading VOY runs...</p>
+                    </div>
+                </div>
+                <div id="voy-shortlist-table" style="display: none;">
+                    <h3>Shortlist</h3>
+                    <table class="games-table" style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                <th>Game ID</th>
+                                <th>Title</th>
+                                <th>Score</th>
+                                <th>Explanation</th>
+                                <th>Feedback</th>
+                            </tr>
+                        </thead>
+                        <tbody id="voy-shortlist-tbody">
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Learning Settings -->
+                <div id="voy-learning-settings" style="margin-top: 30px; padding: 20px; border: 1px solid var(--stroke); border-radius: 8px;">
+                    <h3>Learning Settings</h3>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;">
+                        <div>
+                            <label style="display: flex; align-items: center; margin-bottom: 10px;">
+                                <input type="checkbox" id="voy-learning-enabled" style="margin-right: 8px;">
+                                Learning enabled
+                            </label>
+                            <label style="display: block; margin-bottom: 10px;">
+                                Learning rate:
+                                <input type="number" id="voy-learning-rate" step="0.01" min="0.01" max="0.5" style="width: 100px; margin-left: 10px;">
+                            </label>
+                            <label style="display: block; margin-bottom: 10px;">
+                                Max weight delta:
+                                <input type="number" id="voy-max-weight-delta" step="0.01" min="0.01" max="0.5" style="width: 100px; margin-left: 10px;">
+                            </label>
+                            <label style="display: block; margin-bottom: 10px;">
+                                Min feedback count:
+                                <input type="number" id="voy-min-feedback-count" min="1" max="100" style="width: 100px; margin-left: 10px;">
+                            </label>
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 10px;">
+                                Min skill weight:
+                                <input type="number" id="voy-min-skill-weight" step="0.1" min="0.1" max="1.0" style="width: 100px; margin-left: 10px;">
+                            </label>
+                            <label style="display: block; margin-bottom: 10px;">
+                                Max skill weight:
+                                <input type="number" id="voy-max-skill-weight" step="0.1" min="1.0" max="5.0" style="width: 100px; margin-left: 10px;">
+                            </label>
+                            <label style="display: block; margin-bottom: 10px;">
+                                Frozen skills (comma-separated):
+                                <input type="text" id="voy-frozen-skills" placeholder="skill1, skill2" style="width: 200px; margin-left: 10px;">
+                            </label>
+                            <label style="display: flex; align-items: center; margin-top: 10px;">
+                                <input type="checkbox" id="voy-allow-gpt-advice" style="margin-right: 8px;">
+                                Allow GPT advice
+                            </label>
+                        </div>
+                    </div>
+                    <button class="btn btn-success" onclick="saveVoyLearningConfig()" style="margin-top: 15px;">Save</button>
+                </div>
+
+                <!-- Learning Log -->
+                <div id="voy-learning-log" style="margin-top: 30px;">
+                    <h3>Learning Log</h3>
+                    <div style="margin-bottom: 10px;">
+                        <select id="voy-log-filter-skill" style="padding: 5px; margin-right: 10px;">
+                            <option value="">All skills</option>
+                        </select>
+                        <select id="voy-log-filter-source" style="padding: 5px; margin-right: 10px;">
+                            <option value="">All sources</option>
+                            <option value="feedback">Feedback</option>
+                            <option value="gpt_advice">GPT Advice</option>
+                        </select>
+                        <button class="btn" onclick="loadVoyLearningLog()">↻ Refresh</button>
+                    </div>
+                    <table class="games-table" style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>Skill</th>
+                                <th>Old → New</th>
+                                <th>Delta</th>
+                                <th>Source</th>
+                                <th>Reason</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="voy-learning-log-tbody">
+                            <tr><td colspan="6">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -882,9 +1000,231 @@
             } else if (tab === 'pitches') {
                 event.target.classList.add('active');
                 document.getElementById('pitches-tab').classList.add('active');
+            } else if (tab === 'voy') {
+                event.target.classList.add('active');
+                document.getElementById('voy-tab').classList.add('active');
+                checkVoyEnabled();
+                loadVoyRuns();
             }
         };
 
+        async function checkVoyEnabled() {
+            try {
+                const response = await fetch('/api/v1/voy/health');
+                const data = await response.json();
+                if (data.enabled) {
+                    document.getElementById('voy-tab-button').style.display = 'block';
+                } else {
+                    document.getElementById('voy-tab-button').style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Error checking VOY status:', error);
+                document.getElementById('voy-tab-button').style.display = 'none';
+            }
+        }
+
+        async function runVoy() {
+            const goal = document.getElementById('voy-goal-select').value;
+            if (!goal) {
+                showAlert('Please select a goal', 'error');
+                return;
+            }
+
+            try {
+                showAlert('Creating VOY run...', 'info');
+                const createResponse = await fetch('/api/v1/voy/runs', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({goal: goal})
+                });
+                const run = await createResponse.json();
+                
+                showAlert('Executing VOY run...', 'info');
+                const executeResponse = await fetch(`/api/v1/voy/runs/${run.id}/execute?shortlist_size=10`, {
+                    method: 'POST'
+                });
+                const completedRun = await executeResponse.json();
+                
+                showAlert('VOY run completed!', 'success');
+                loadVoyRun(run.id);
+            } catch (error) {
+                console.error('Error running VOY:', error);
+                showAlert('Error running VOY: ' + error.message, 'error');
+            }
+        }
+
+        async function loadVoyRuns() {
+            try {
+                const response = await fetch('/api/v1/voy/runs?limit=10');
+                const runs = await response.json();
+                
+                const container = document.getElementById('voy-runs-list');
+                if (runs.length === 0) {
+                    container.innerHTML = '<p>No VOY runs yet. Create one to get started.</p>';
+                    return;
+                }
+                
+                container.innerHTML = `
+                    <h3>Recent Runs</h3>
+                    <ul style="list-style: none; padding: 0;">
+                        ${runs.map(run => `
+                            <li style="padding: 10px; margin: 5px 0; border: 1px solid var(--stroke); border-radius: 4px; cursor: pointer;" onclick="loadVoyRun('${run.id}')">
+                                <strong>${run.goal}</strong> - ${run.status} (${run.shortlist_size} items)
+                                <br><small>${new Date(run.created_at).toLocaleString()}</small>
+                            </li>
+                        `).join('')}
+                    </ul>
+                `;
+            } catch (error) {
+                console.error('Error loading VOY runs:', error);
+                document.getElementById('voy-runs-list').innerHTML = '<p>Error loading runs</p>';
+            }
+        }
+
+        async function loadVoyRun(runId) {
+            try {
+                const response = await fetch(`/api/v1/voy/runs/${runId}`);
+                const data = await response.json();
+                
+                const tbody = document.getElementById('voy-shortlist-tbody');
+                tbody.innerHTML = data.items.map(item => `
+                    <tr>
+                        <td>${item.rank || '-'}</td>
+                        <td>${item.game_id.substring(0, 8)}...</td>
+                        <td>${item.title || 'N/A'}</td>
+                        <td>${item.total_score.toFixed(2)}</td>
+                        <td>${item.explanation || '-'}</td>
+                        <td>
+                            <button onclick="submitVoyFeedback('${item.id}', 'good')" style="padding: 4px 8px; margin: 0 4px;">👍</button>
+                            <button onclick="submitVoyFeedback('${item.id}', 'bad')" style="padding: 4px 8px; margin: 0 4px;">👎</button>
+                        </td>
+                    </tr>
+                `).join('');
+                
+                document.getElementById('voy-shortlist-table').style.display = 'block';
+            } catch (error) {
+                console.error('Error loading VOY run:', error);
+                showAlert('Error loading run: ' + error.message, 'error');
+            }
+        }
+
+        async function submitVoyFeedback(runItemId, feedbackType) {
+            try {
+                const response = await fetch('/api/v1/voy/feedback', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        run_item_id: runItemId,
+                        feedback_type: feedbackType
+                    })
+                });
+                
+                if (response.ok) {
+                    showAlert(`Feedback submitted (${feedbackType})`, 'success');
+                    loadVoyLearningLog(); // Refresh learning log
+                } else {
+                    const error = await response.json();
+                    showAlert('Error: ' + error.detail, 'error');
+                }
+            } catch (error) {
+                console.error('Error submitting feedback:', error);
+                showAlert('Error submitting feedback', 'error');
+            }
+        }
+
+        async function loadVoyLearningConfig() {
+            try {
+                const response = await fetch('/api/v1/voy/learning-config');
+                const config = await response.json();
+                
+                document.getElementById('voy-learning-enabled').checked = config.learning_enabled;
+                document.getElementById('voy-learning-rate').value = config.learning_rate;
+                document.getElementById('voy-max-weight-delta').value = config.max_weight_delta;
+                document.getElementById('voy-min-skill-weight').value = config.min_skill_weight;
+                document.getElementById('voy-max-skill-weight').value = config.max_skill_weight;
+                document.getElementById('voy-min-feedback-count').value = config.min_feedback_count;
+                document.getElementById('voy-frozen-skills').value = config.frozen_skills.join(', ');
+                document.getElementById('voy-allow-gpt-advice').checked = config.allow_gpt_advice;
+            } catch (error) {
+                console.error('Error loading learning config:', error);
+                showAlert('Error loading learning config', 'error');
+            }
+        }
+
+        async function saveVoyLearningConfig() {
+            try {
+                const frozenSkillsText = document.getElementById('voy-frozen-skills').value;
+                const frozenSkills = frozenSkillsText.split(',').map(s => s.trim()).filter(s => s);
+                
+                const config = {
+                    learning_enabled: document.getElementById('voy-learning-enabled').checked,
+                    learning_rate: parseFloat(document.getElementById('voy-learning-rate').value),
+                    max_weight_delta: parseFloat(document.getElementById('voy-max-weight-delta').value),
+                    min_skill_weight: parseFloat(document.getElementById('voy-min-skill-weight').value),
+                    max_skill_weight: parseFloat(document.getElementById('voy-max-skill-weight').value),
+                    min_feedback_count: parseInt(document.getElementById('voy-min-feedback-count').value),
+                    frozen_skills: frozenSkills,
+                    allow_gpt_advice: document.getElementById('voy-allow-gpt-advice').checked
+                };
+                
+                const response = await fetch('/api/v1/voy/learning-config', {
+                    method: 'PATCH',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(config)
+                });
+                
+                if (response.ok) {
+                    showAlert('Learning config saved', 'success');
+                } else {
+                    const error = await response.json();
+                    showAlert('Error: ' + error.detail, 'error');
+                }
+            } catch (error) {
+                console.error('Error saving learning config:', error);
+                showAlert('Error saving learning config', 'error');
+            }
+        }
+
+        async function loadVoyLearningLog() {
+            try {
+                const skillFilter = document.getElementById('voy-log-filter-skill').value;
+                const sourceFilter = document.getElementById('voy-log-filter-source').value;
+                
+                let url = '/api/v1/voy/learning-log?limit=50';
+                if (skillFilter) url += `&skill_key=${skillFilter}`;
+                if (sourceFilter) url += `&source=${sourceFilter}`;
+                
+                const response = await fetch(url);
+                const logs = await response.json();
+                
+                const tbody = document.getElementById('voy-learning-log-tbody');
+                if (logs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6">No learning log entries</td></tr>';
+                    return;
+                }
+                
+                tbody.innerHTML = logs.map(log => `
+                    <tr>
+                        <td>${log.skill_key}</td>
+                        <td>${log.old_weight.toFixed(3)} → ${log.new_weight.toFixed(3)}</td>
+                        <td>${log.delta > 0 ? '+' : ''}${log.delta.toFixed(3)}</td>
+                        <td>${log.source}</td>
+                        <td>${log.reason || '-'}</td>
+                        <td>${new Date(log.created_at).toLocaleString()}</td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading learning log:', error);
+                document.getElementById('voy-learning-log-tbody').innerHTML = '<tr><td colspan="6">Error loading log</td></tr>';
+            }
+        }
+
+        // Check VOY on page load (after DOM is ready)
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', checkVoyEnabled);
+        } else {
+            checkVoyEnabled();
+        }
         </script>
 </body>
 </html>

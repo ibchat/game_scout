@@ -11,9 +11,29 @@
    - **Database**: PostgreSQL (default config works with Docker)
    - **Redis**: Redis (default config works with Docker)
 
-3. Optional: Add API keys for full functionality
+3. Start all services:
+```bash
+   bash scripts/up_all.sh
+   # or manually:
+   docker compose up -d postgres redis api beat worker worker_trends
+```
+
+4. Optional: Add API keys for full functionality
 
 ## Required Configuration
+
+### Services Overview
+
+Game Scout requires these services to be running:
+
+- **postgres**: PostgreSQL database (stores all data)
+- **redis**: Redis cache and Celery message broker
+- **api**: FastAPI web server (REST API)
+- **worker**: Celery worker (processes background tasks for Reddit/YouTube/TikTok/Twitter/Discord)
+- **beat**: Celery beat scheduler (runs scheduled tasks)
+- **worker_trends**: Trends analysis worker (optional, for trends pipeline)
+
+**Important**: Without `worker` running, data collection from external sources (YouTube, TikTok, Twitter, Reddit, Discord) will not work. The `beat` service schedules periodic tasks, but they require `worker` to execute.
 
 ### Database & Redis
 These work out-of-box with Docker Compose:
@@ -78,6 +98,9 @@ TIKTOK_API_KEY=your_tiktok_api_key
 
 To verify your configuration:
 ```bash
+# Verify all services are running
+bash scripts/verify_workers_and_sources.sh
+
 # Test database connection
 docker-compose exec postgres psql -U postgres -d game_scout -c "SELECT 1;"
 
