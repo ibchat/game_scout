@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 from dev_supervisor.config import config
 from dev_supervisor.report import SupervisorResult, StageStatus
+from dev_supervisor.http_utils import check_intel_health
 
 
 def run_orchestrator_smoke() -> SupervisorResult:
@@ -90,6 +91,18 @@ def run_orchestrator_smoke() -> SupervisorResult:
     except Exception as e:
         errors.append(f"Policy engine load failed: {str(e)}")
     
+    # Check 5: Intel health endpoint (if API is running)
+    # This check is optional - only if we can reach the API
+    health_result = check_intel_health()
+    if health_result["error"]:
+        # API not running is a warning, not error
+        warnings.append(f"Intel health endpoint not reachable: {health_result['error']}")
+    else:
+        if not health_result["ok"]:
+            warnings.append("Intel health endpoint returned not OK")
+        if not health_result["policy_loaded"]:
+            warnings.append("Intel health endpoint reports policy not loaded")
+    
     status = StageStatus.FAIL if errors else (StageStatus.WARN if warnings else StageStatus.OK)
     
     return SupervisorResult(
@@ -100,6 +113,7 @@ def run_orchestrator_smoke() -> SupervisorResult:
         details={
             "models_checked": True,
             "collectors_checked": True,
-            "policy_checked": True
+            "policy_checked": True,
+            "health_check": health_result
         }
     )
