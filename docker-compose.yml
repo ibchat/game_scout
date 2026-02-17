@@ -50,7 +50,8 @@ services:
       COMMENT_SAMPLE_SIZE: ${COMMENT_SAMPLE_SIZE:-200}
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
       VOY_ENABLED: "true"
-      INTEL_ENABLED: "true"
+      # INTEL_ENABLED: use value from .env, or default to "true" if not set
+      INTEL_ENABLED: ${INTEL_ENABLED:-true}
     depends_on:
       postgres:
         condition: service_healthy
