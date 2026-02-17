@@ -12,7 +12,7 @@ from dev_supervisor.report import SupervisorResult, StageStatus
 
 def run_contract_tests() -> SupervisorResult:
     """
-    Run contract tests using pytest.
+    Run contract tests using pytest inside Docker container.
     Returns SupervisorResult.
     """
     errors: List[str] = []
@@ -29,25 +29,24 @@ def run_contract_tests() -> SupervisorResult:
             warnings=warnings
         )
     
-    # Check if pytest is available
+    # Check if Docker is available
     try:
-        pytest_check = subprocess.run(
-            [sys.executable, "-m", "pytest", "--version"],
+        docker_check = subprocess.run(
+            ["docker", "--version"],
             capture_output=True,
             text=True,
             timeout=5
         )
-        
-        if pytest_check.returncode != 0:
-            warnings.append("pytest not available, skipping contract tests")
+        if docker_check.returncode != 0:
+            warnings.append("Docker not available, skipping contract tests")
             return SupervisorResult(
                 stage="contract_tests",
                 status=StageStatus.WARN,
                 errors=[],
                 warnings=warnings
             )
-    except Exception as e:
-        warnings.append(f"Cannot check pytest availability: {str(e)}")
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        warnings.append("Docker not found, skipping contract tests")
         return SupervisorResult(
             stage="contract_tests",
             status=StageStatus.WARN,
@@ -55,10 +54,36 @@ def run_contract_tests() -> SupervisorResult:
             warnings=warnings
         )
     
-    # Run pytest
+    # Check if service is running
+    try:
+        service_check = subprocess.run(
+            ["docker", "compose", "ps", config.DOCKER_SERVICE_API, "--format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if service_check.returncode != 0:
+            warnings.append(f"Service {config.DOCKER_SERVICE_API} not running, skipping contract tests")
+            return SupervisorResult(
+                stage="contract_tests",
+                status=StageStatus.WARN,
+                errors=[],
+                warnings=warnings
+            )
+    except Exception as e:
+        warnings.append(f"Cannot check service status: {str(e)}")
+        return SupervisorResult(
+            stage="contract_tests",
+            status=StageStatus.WARN,
+            errors=[],
+            warnings=warnings
+        )
+    
+    # Run pytest inside Docker container
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pytest", str(tests_dir), "-v", "--tb=short"],
+            ["docker", "compose", "exec", "-T", config.DOCKER_SERVICE_API, 
+             "python", "-m", "pytest", str(tests_dir), "-v", "--tb=short"],
             capture_output=True,
             text=True,
             timeout=300

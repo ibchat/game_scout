@@ -17,7 +17,7 @@ def run_orchestrator_smoke() -> SupervisorResult:
     1. Check IntelSource model is accessible
     2. Check intel_raw_items table exists (via model)
     3. Check collectors can be instantiated
-    No external network calls.
+    4. Run actual RSS collection smoke test inside Docker
     """
     errors: List[str] = []
     warnings: List[str] = []
@@ -58,29 +58,37 @@ def run_orchestrator_smoke() -> SupervisorResult:
     except Exception as e:
         errors.append(f"Error checking model structure: {str(e)}")
     
-    # Check 3: Collectors can be instantiated
+    # Check 3: Collectors can be imported and have correct interface
     try:
         from apps.intel.services.collectors.rss_collector import RSSCollector
         from apps.intel.services.collectors.steam_news_collector import SteamNewsCollector
         from apps.intel.services.collectors.reddit_rss_collector import RedditRSSCollector
+        from sqlalchemy.orm import Session
+        from unittest.mock import Mock
         
-        # Try to instantiate (should not fail)
-        rss_collector = RSSCollector()
-        steam_collector = SteamNewsCollector()
-        reddit_collector = RedditRSSCollector()
+        # Check collectors have required methods (without instantiating, as they need db)
+        if not hasattr(RSSCollector, 'collect'):
+            errors.append("RSSCollector missing 'collect' method")
+        if not hasattr(RSSCollector, 'collect_source'):
+            errors.append("RSSCollector missing 'collect_source' method")
+        if not hasattr(SteamNewsCollector, 'collect'):
+            errors.append("SteamNewsCollector missing 'collect' method")
+        if not hasattr(RedditRSSCollector, 'collect'):
+            errors.append("RedditRSSCollector missing 'collect' method")
         
-        # Check they have collect method
-        if not hasattr(rss_collector, 'collect'):
-            errors.append("RSSCollector instance missing 'collect' method")
-        if not hasattr(steam_collector, 'collect'):
-            errors.append("SteamNewsCollector instance missing 'collect' method")
-        if not hasattr(reddit_collector, 'collect'):
-            errors.append("RedditRSSCollector instance missing 'collect' method")
+        # Try to instantiate with mock db to verify __init__ signature
+        mock_db = Mock(spec=Session)
+        try:
+            rss_collector = RSSCollector(db=mock_db)
+            if not hasattr(rss_collector, 'db'):
+                errors.append("RSSCollector instance missing 'db' attribute")
+        except TypeError as e:
+            errors.append(f"RSSCollector.__init__ signature incorrect: {str(e)}")
             
     except ImportError as e:
         errors.append(f"Failed to import collectors: {str(e)}")
     except Exception as e:
-        errors.append(f"Error instantiating collectors: {str(e)}")
+        errors.append(f"Error checking collectors: {str(e)}")
     
     # Check 4: Policy engine can be loaded
     try:
@@ -102,6 +110,70 @@ def run_orchestrator_smoke() -> SupervisorResult:
             warnings.append("Intel health endpoint returned not OK")
         if not health_result["policy_loaded"]:
             warnings.append("Intel health endpoint reports policy not loaded")
+    
+    # Check 6: Run actual RSS collection smoke test (inside Docker if available)
+    smoke_script = Path("scripts/intel_smoke_collect_rss.py")
+    if smoke_script.exists():
+        try:
+            # Check if Docker is available
+            docker_check = subprocess.run(
+                ["docker", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if docker_check.returncode == 0:
+                # Try to run smoke test in Docker
+                try:
+                    service_check = subprocess.run(
+                        ["docker", "compose", "ps", config.DOCKER_SERVICE_API, "--format", "json"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
+                    if service_check.returncode == 0:
+                        # Run smoke test
+                        smoke_result = subprocess.run(
+                            ["docker", "compose", "exec", "-T", config.DOCKER_SERVICE_API,
+                             "python", "scripts/intel_smoke_collect_rss.py"],
+                            capture_output=True,
+                            text=True,
+                            timeout=120
+                        )
+                        if smoke_result.returncode == 0:
+                            # Parse output for COLLECTED/TOTAL
+                            output = smoke_result.stdout
+                            if "COLLECTED:" in output and "TOTAL:" in output:
+                                # Extract numbers
+                                import re
+                                collected_match = re.search(r"COLLECTED:\s*(\d+)", output)
+                                total_match = re.search(r"TOTAL:\s*(\d+)", output)
+                                if collected_match and total_match:
+                                    collected = int(collected_match.group(1))
+                                    total = int(total_match.group(1))
+                                    if total > 0:
+                                        # Success
+                                        pass  # No error
+                                    else:
+                                        errors.append("Smoke test: TOTAL is 0, no items in database")
+                                else:
+                                    warnings.append("Smoke test: Could not parse COLLECTED/TOTAL from output")
+                            else:
+                                warnings.append("Smoke test: Output format unexpected")
+                        else:
+                            errors.append(f"Smoke test failed with exit code {smoke_result.returncode}")
+                            if smoke_result.stderr:
+                                errors.append(f"Smoke test error: {smoke_result.stderr[:200]}")
+                except subprocess.TimeoutExpired:
+                    errors.append("Smoke test timed out after 120 seconds")
+                except Exception as e:
+                    warnings.append(f"Could not run smoke test in Docker: {str(e)}")
+            else:
+                warnings.append("Docker not available, skipping smoke test execution")
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            warnings.append("Docker not found, skipping smoke test execution")
+    else:
+        warnings.append(f"Smoke script not found: {smoke_script}")
     
     status = StageStatus.FAIL if errors else (StageStatus.WARN if warnings else StageStatus.OK)
     
