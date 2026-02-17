@@ -1,7 +1,7 @@
 """add voy tables
 
 Revision ID: 006_voy_tables
-Revises: 005_add_discord_publisher_hunt_fields
+Revises: 005_discord_publisher_hunt
 Create Date: 2026-02-03 16:00:00.000000
 
 """
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = '006_voy_tables'
-down_revision = '005_add_discord_publisher_hunt_fields'
+down_revision = '005_discord_publisher_hunt'
 branch_labels = None
 depends_on = None
 
