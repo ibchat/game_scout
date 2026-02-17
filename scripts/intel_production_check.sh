@@ -45,17 +45,20 @@ check_health() {
     log_info "Checking Intel health endpoint..."
     
     if [ "$IN_CONTAINER" = true ]; then
-        health_response=$(python3 -c "
+        health_response=$(python3 << PYTHON_EOF
 import httpx
 import json
+import os
+url = os.getenv('INTEL_HEALTH_URL', '${INTEL_HEALTH_URL}')
 try:
-    resp = httpx.get('${INTEL_HEALTH_URL}', timeout=5)
+    resp = httpx.get(url, timeout=5)
     resp.raise_for_status()
     data = resp.json()
     print(json.dumps(data))
 except Exception as e:
     print(json.dumps({'error': str(e)}))
-")
+PYTHON_EOF
+)
     else
         health_response=$(curl -sS "${INTEL_HEALTH_URL}" 2>&1 || echo '{"error": "curl failed"}')
     fi
@@ -76,14 +79,15 @@ check_sources() {
     log_info "Checking Intel sources in database..."
     
     if [ "$IN_CONTAINER" = true ]; then
-        source_count=$(python3 -c "
+        source_count=$(python3 << 'PYTHON_EOF'
 from apps.db.session import SessionLocal
 from apps.intel.db.models import IntelSource
 db = SessionLocal()
 count = db.query(IntelSource).filter(IntelSource.is_enabled == True).count()
 print(count)
 db.close()
-")
+PYTHON_EOF
+)
     else
         source_count=$(docker compose exec -T postgres psql -U postgres -d game_scout -t -c "SELECT COUNT(*) FROM intel_sources WHERE is_enabled = true;" 2>/dev/null | tr -d ' ' || echo "0")
     fi
@@ -102,7 +106,7 @@ check_publish_logs() {
     log_info "Checking recent publish logs..."
     
     if [ "$IN_CONTAINER" = true ]; then
-        publish_logs=$(python3 -c "
+        publish_logs=$(python3 << 'PYTHON_EOF'
 from apps.db.session import SessionLocal
 from apps.intel.db.models import IntelPublishLog
 import json
@@ -119,7 +123,8 @@ for log in logs:
     })
 print(json.dumps(result))
 db.close()
-")
+PYTHON_EOF
+)
     else
         publish_logs=$(docker compose exec -T postgres psql -U postgres -d game_scout -t -A -F',' -c "
             SELECT id, status, COALESCE(telegram_message_id, ''), COALESCE(LEFT(error, 100), ''), published_at
@@ -168,17 +173,20 @@ run_pipeline_dry_run() {
     log_info "Running pipeline dry run..."
     
     if [ "$IN_CONTAINER" = true ]; then
-        pipeline_response=$(python3 -c "
+        pipeline_response=$(python3 << PYTHON_EOF
 import httpx
 import json
+import os
+url = os.getenv('INTEL_PIPELINE_URL', '${INTEL_PIPELINE_URL}')
 try:
-    resp = httpx.post('${INTEL_PIPELINE_URL}', json={'sources': ['Steam RSS test'], 'dry_run': True}, timeout=60)
+    resp = httpx.post(url, json={'sources': ['Steam RSS test'], 'dry_run': True}, timeout=60)
     resp.raise_for_status()
     data = resp.json()
     print(json.dumps(data))
 except Exception as e:
     print(json.dumps({'error': str(e)}))
-")
+PYTHON_EOF
+)
     else
         pipeline_response=$(curl -sS -X POST "${INTEL_PIPELINE_URL}" \
             -H "Content-Type: application/json" \
@@ -215,17 +223,20 @@ run_pipeline_real() {
     log_info "Running pipeline real run (eligible_count=$eligible_count)..."
     
     if [ "$IN_CONTAINER" = true ]; then
-        pipeline_response=$(python3 -c "
+        pipeline_response=$(python3 << PYTHON_EOF
 import httpx
 import json
+import os
+url = os.getenv('INTEL_PIPELINE_URL', '${INTEL_PIPELINE_URL}')
 try:
-    resp = httpx.post('${INTEL_PIPELINE_URL}', json={'sources': ['Steam RSS test'], 'dry_run': False}, timeout=120)
+    resp = httpx.post(url, json={'sources': ['Steam RSS test'], 'dry_run': False}, timeout=120)
     resp.raise_for_status()
     data = resp.json()
     print(json.dumps(data))
 except Exception as e:
     print(json.dumps({'error': str(e)}))
-")
+PYTHON_EOF
+)
     else
         pipeline_response=$(curl -sS -X POST "${INTEL_PIPELINE_URL}" \
             -H "Content-Type: application/json" \
@@ -242,7 +253,7 @@ except Exception as e:
     
     # Get breakdown of skipped reasons
     if [ "$IN_CONTAINER" = true ]; then
-        skipped_breakdown=$(python3 -c "
+        skipped_breakdown=$(python3 << 'PYTHON_EOF'
 from apps.db.session import SessionLocal
 from apps.intel.db.models import IntelPublishLog
 import json
@@ -257,7 +268,8 @@ for log in recent_skipped:
     breakdown[reason] = breakdown.get(reason, 0) + 1
 print(json.dumps(breakdown))
 db.close()
-")
+PYTHON_EOF
+)
     else
         skipped_breakdown=$(docker compose exec -T postgres psql -U postgres -d game_scout -t -A -c "
             SELECT COALESCE(LEFT(error, 50), 'unknown')
