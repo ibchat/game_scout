@@ -36,6 +36,32 @@ def run_contract_tests() -> SupervisorResult:
     
     if is_inside_container:
         # Inside container: run pytest directly
+        # First check if pytest is available
+        try:
+            pytest_check = subprocess.run(
+                [sys.executable, "-m", "pytest", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if pytest_check.returncode != 0:
+                errors.append("pytest not available in container (required for contract tests)")
+                return SupervisorResult(
+                    stage="contract_tests",
+                    status=StageStatus.FAIL,
+                    errors=errors,
+                    warnings=warnings
+                )
+        except Exception as e:
+            errors.append(f"Failed to check pytest availability: {str(e)}")
+            return SupervisorResult(
+                stage="contract_tests",
+                status=StageStatus.FAIL,
+                errors=errors,
+                warnings=warnings
+            )
+        
+        # Run pytest
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "pytest", str(tests_dir), "-v", "--tb=short"],

@@ -227,7 +227,19 @@ Single-command development orchestrator that runs all checks and validations, wi
 **One-button mode (recommended):**
 
 ```bash
-./scripts/gs-dev.sh
+bash scripts/gs-dev.sh
+```
+
+**With automatic fixes:**
+
+```bash
+bash scripts/gs-dev.sh --autofix
+```
+
+**Diagnostic mode (verify setup without running tests):**
+
+```bash
+bash scripts/verify_autopilot.sh
 ```
 
 This command:

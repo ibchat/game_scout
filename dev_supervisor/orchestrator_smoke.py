@@ -156,8 +156,20 @@ def run_orchestrator_smoke() -> SupervisorResult:
                             collected = int(collected_match.group(1))
                             total = int(total_match.group(1))
                             if total > 0:
-                                # Success
-                                pass  # No error
+                                # Success - verify via DB query
+                                try:
+                                    from apps.db.session import SessionLocal
+                                    from apps.intel.db.models import IntelRawItem
+                                    db = SessionLocal()
+                                    db_count = db.query(IntelRawItem).count()
+                                    db.close()
+                                    if db_count > 0:
+                                        # Success
+                                        pass
+                                    else:
+                                        errors.append(f"Smoke test reported TOTAL={total} but DB query returned 0")
+                                except Exception as db_err:
+                                    warnings.append(f"Could not verify DB count: {str(db_err)}")
                             else:
                                 errors.append("Smoke test: TOTAL is 0, no items in database")
                         else:
@@ -171,7 +183,7 @@ def run_orchestrator_smoke() -> SupervisorResult:
             except subprocess.TimeoutExpired:
                 errors.append("Smoke test timed out after 120 seconds")
             except Exception as e:
-                warnings.append(f"Could not run smoke test: {str(e)}")
+                errors.append(f"Could not run smoke test: {str(e)}")
         else:
             # On host: run via docker compose
             try:
