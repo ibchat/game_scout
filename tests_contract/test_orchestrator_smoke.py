@@ -30,9 +30,16 @@ def test_intel_raw_item_has_required_fields():
 
 def test_collectors_can_be_instantiated():
     """Test that collectors can be instantiated"""
-    collector = RSSCollector()
+    from unittest.mock import Mock
+    from sqlalchemy.orm import Session
+    
+    # Collectors require db session
+    mock_db = Mock(spec=Session)
+    collector = RSSCollector(db=mock_db)
     assert collector is not None
     assert hasattr(collector, 'collect')
+    assert hasattr(collector, 'collect_source')
+    assert hasattr(collector, 'db')
 
 
 def test_policy_engine_loads():
