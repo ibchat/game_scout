@@ -13,12 +13,12 @@ class LLMClient:
     """Unified LLM client supporting multiple providers"""
     
     def __init__(self):
-        self.provider = os.getenv("LLM_PROVIDER", "anthropic")
-        self.model = os.getenv("LLM_MODEL", "claude-3-5-sonnet-20241022")
+        self.provider = os.getenv("LLM_PROVIDER", "anthropic").lower()
         
         if self.provider == "anthropic":
+            self.model = os.getenv("LLM_MODEL", "claude-3-5-sonnet-20241022")
             api_key = os.getenv("ANTHROPIC_API_KEY")
-            if not api_key:
+            if not api_key or api_key == "your_api_key_here":
                 raise ValueError("ANTHROPIC_API_KEY not set")
             
             # Import только когда нужно
@@ -27,6 +27,18 @@ class LLMClient:
                 self.client = anthropic.Anthropic(api_key=api_key)
             except ImportError:
                 raise ValueError("anthropic package not installed")
+        elif self.provider == "openai":
+            self.model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key or api_key == "your_api_key_here":
+                raise ValueError("OPENAI_API_KEY not set")
+            
+            # Import только когда нужно
+            try:
+                from openai import OpenAI
+                self.client = OpenAI(api_key=api_key)
+            except ImportError:
+                raise ValueError("openai package not installed")
         else:
             raise ValueError(f"Unsupported LLM provider: {self.provider}")
     
@@ -40,6 +52,8 @@ class LLMClient:
         try:
             if self.provider == "anthropic":
                 return self._generate_anthropic(prompt, max_tokens, temperature)
+            elif self.provider == "openai":
+                return self._generate_openai(prompt, max_tokens, temperature)
             else:
                 raise ValueError(f"Unsupported provider: {self.provider}")
                 
@@ -76,6 +90,35 @@ class LLMClient:
             logger.error(f"Anthropic API error: {e}")
             return None
     
+    def _generate_openai(
+        self, 
+        prompt: str, 
+        max_tokens: int,
+        temperature: float
+    ) -> Optional[str]:
+        """Generate using OpenAI GPT"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            )
+            
+            if response.choices and len(response.choices) > 0:
+                return response.choices[0].message.content
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"OpenAI API error: {e}")
+            return None
+    
     def generate_json(
         self,
         prompt: str,
@@ -110,12 +153,21 @@ def get_llm_client() -> Optional[LLMClient]:
     """
     Get LLM client instance
     Returns None if API key not configured (не выбрасывает ошибку!)
+    Supports both Anthropic and OpenAI providers.
     """
     try:
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key or api_key == "your_api_key_here":
-            logger.info("LLM API key not configured, LLM features will be skipped")
-            return None
+        provider = os.getenv("LLM_PROVIDER", "anthropic").lower()
+        
+        if provider == "openai":
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key or api_key == "your_api_key_here":
+                logger.info("OPENAI_API_KEY not configured, LLM features will be skipped")
+                return None
+        else:  # default to anthropic
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if not api_key or api_key == "your_api_key_here":
+                logger.info("ANTHROPIC_API_KEY not configured, LLM features will be skipped")
+                return None
         
         return LLMClient()
     except Exception as e:

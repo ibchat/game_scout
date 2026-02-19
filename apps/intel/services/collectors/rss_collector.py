@@ -8,6 +8,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from urllib.parse import urlparse
 import feedparser
+import httpx
 
 from apps.intel.db.models import IntelSource
 from apps.intel.services.collectors.base_collector import BaseIntelCollector
@@ -29,12 +30,17 @@ class RSSCollector(BaseIntelCollector):
         
         collected = 0
         saved = 0
+        duplicates = 0
         errors = 0
         
         try:
             # Fetch RSS feed
             logger.info(f"Collecting RSS feed: {source.url}")
             response = self.fetch_url(source.url)
+            
+            # Track success - reset health
+            from apps.intel.services.source_health import reset_source_health_on_success
+            reset_source_health_on_success(self.db, source)
             
             # Parse RSS
             feed = feedparser.parse(response.text)
@@ -93,14 +99,25 @@ class RSSCollector(BaseIntelCollector):
                     
                     if raw_item:
                         saved += 1
+                    else:
+                        # If save_raw_item returns None, it's likely a duplicate
+                        duplicates += 1
                     
                 except Exception as e:
                     errors += 1
                     logger.error(f"Error processing RSS entry: {e}", exc_info=True)
             
-            logger.info(f"RSS collection complete: {source.url} - collected={collected}, saved={saved}, errors={errors}")
-            return {"collected": collected, "saved": saved, "errors": errors}
+            logger.info(f"[INTEL][COLLECT] {source.name}: collected={collected}, saved={saved}, duplicates={duplicates}, errors={errors}")
+            return {"collected": collected, "saved": saved, "duplicates": duplicates, "errors": errors}
             
+        except httpx.HTTPStatusError as e:
+            # Track HTTP errors for source health
+            error_code = e.response.status_code if hasattr(e, 'response') else None
+            from apps.intel.services.source_health import track_source_error
+            track_source_error(self.db, source, error_code=error_code, error_message=str(e))
+            
+            logger.error(f"[INTEL][COLLECT] RSS collection failed for {source.url}: {e}", exc_info=True)
+            return {"collected": collected, "saved": saved, "duplicates": duplicates, "errors": errors + 1}
         except Exception as e:
-            logger.error(f"RSS collection failed for {source.url}: {e}", exc_info=True)
-            return {"collected": collected, "saved": saved, "errors": errors + 1}
+            logger.error(f"[INTEL][COLLECT] RSS collection failed for {source.url}: {e}", exc_info=True)
+            return {"collected": collected, "saved": saved, "duplicates": duplicates, "errors": errors + 1}

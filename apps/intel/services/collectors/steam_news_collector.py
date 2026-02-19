@@ -39,6 +39,7 @@ class SteamNewsCollector(BaseIntelCollector):
         
         collected = 0
         saved = 0
+        duplicates = 0
         errors = 0
         
         try:
@@ -99,17 +100,20 @@ class SteamNewsCollector(BaseIntelCollector):
                     
                     if raw_item:
                         saved += 1
+                    else:
+                        # If save_raw_item returns None, it's likely a duplicate
+                        duplicates += 1
                     
                 except Exception as e:
                     errors += 1
                     logger.error(f"Error processing Steam news item: {e}", exc_info=True)
             
-            logger.info(f"Steam news collection complete: app {steam_appid} - collected={collected}, saved={saved}, errors={errors}")
-            return {"collected": collected, "saved": saved, "errors": errors}
+            logger.info(f"[INTEL][COLLECT] {source.name}: collected={collected}, saved={saved}, duplicates={duplicates}, errors={errors}")
+            return {"collected": collected, "saved": saved, "duplicates": duplicates, "errors": errors}
             
         except Exception as e:
-            logger.error(f"Steam news collection failed for app {steam_appid}: {e}", exc_info=True)
-            return {"collected": collected, "saved": saved, "errors": errors + 1}
+            logger.error(f"[INTEL][COLLECT] Steam news collection failed for app {steam_appid}: {e}", exc_info=True)
+            return {"collected": collected, "saved": saved, "duplicates": duplicates, "errors": errors + 1}
     
     def _extract_steam_appid(self, source: IntelSource) -> Optional[int]:
         """

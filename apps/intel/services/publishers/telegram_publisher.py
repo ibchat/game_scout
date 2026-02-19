@@ -14,6 +14,7 @@ from apps.intel.db.models import IntelEvent, IntelPublishLog
 from apps.intel.policy.policy_engine import load_policy
 from apps.intel.config import get_telegram_config, INTEL_DRY_RUN
 from typing import Tuple
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -76,72 +77,51 @@ class TelegramPublisher:
         return True, None
     
     def _format_message(self, event: IntelEvent, brief: Optional[Dict[str, Any]] = None) -> str:
-        """Format event as Telegram message with [Category | Score] format"""
+        """
+        Format event as structured Telegram message with country tags, category, and importance badge.
+        
+        New format:
+        {country_emoji} #{country_code} | {category_tag}
+        {importance_emoji} {importance_label} (Score: {score})
+        
+        Steam: {title}
+        
+        Кратко:
+        {executive_summary}
+        
+        Что произошло:
+        {what_happened}
+        ...
+        """
+        from apps.intel.services.country_detector import detect_country
+        from apps.intel.services.telegram_formatters import format_telegram_message, importance_badge
+        
         policy = load_policy()
         template_config = policy.get("telegram_template", {})
         max_chars = template_config.get("max_chars", 3500)
         
         # Use brief if available, otherwise use event fields
-        if brief:
-            title = brief.get("title", event.title_ru)
-            what_happened = brief.get("what_happened", event.what_happened_ru)
-            why_it_matters = brief.get("why_it_matters", event.why_it_matters_ru or "нет данных")
-            key_points = brief.get("key_points", [])
-            source_url = brief.get("source_url", "")
-        else:
-            title = event.title_ru
-            what_happened = event.what_happened_ru
-            why_it_matters = event.why_it_matters_ru or "нет данных"
-            key_points = []
-            source_url = event.sources[0] if event.sources and isinstance(event.sources, list) else (str(event.sources) if event.sources else "")
+        if not brief:
+            brief = {
+                "title": event.title_ru or "",
+                "what_happened": event.what_happened_ru or "",
+                "why_it_matters": event.why_it_matters_ru or "нет данных",
+                "key_points": [],
+                "source_url": event.sources[0] if event.sources and isinstance(event.sources, list) else (str(event.sources) if event.sources else ""),
+                "signal_type": event.event_type
+            }
         
-        # Get category and score
-        signal_type = brief.get("signal_type", event.event_type) if brief else event.event_type
+        # Detect country
+        source_url = brief.get("source_url", "")
+        text_for_country = brief.get("what_happened", "") or brief.get("title", "")
+        country_info = detect_country(event, source_url=source_url, text=text_for_country)
+        
+        # Get importance badge
         score = event.significance_score if hasattr(event, 'significance_score') else 0
+        importance_info = importance_badge(score)
         
-        # Format category name in Russian
-        category_names = {
-            "release": "Релиз",
-            "patch_major": "Обновление",
-            "discount": "Скидка",
-            "publisher_deal": "Издатель",
-            "funding": "Финансирование",
-            "market_trend": "Тренд",
-            "controversy": "Спор",
-            "other": "Прочее"
-        }
-        category_ru = category_names.get(signal_type, signal_type)
-        
-        # Build message
-        message_parts = []
-        
-        # Title with category and score
-        message_parts.append(f"🔹 [{category_ru} | {score}] {title}\n")
-        
-        # What happened
-        message_parts.append(f"Что произошло:\n{what_happened}\n")
-        
-        # Why it matters
-        if why_it_matters and why_it_matters != "нет данных":
-            message_parts.append(f"Почему это важно:\n{why_it_matters}\n")
-        
-        # Key points
-        if key_points:
-            message_parts.append("Ключевые факты:")
-            for point in key_points[:6]:  # Max 6 points
-                message_parts.append(f"• {point}")
-            message_parts.append("")  # Empty line
-        
-        # Source URL (always required)
-        if source_url:
-            message_parts.append(f"Источник:\n{source_url}")
-        elif event.sources:
-            source_url = event.sources[0] if isinstance(event.sources, list) else str(event.sources)
-            message_parts.append(f"Источник:\n{source_url}")
-        else:
-            message_parts.append("Источник: нет данных")
-        
-        message = "\n".join(message_parts)
+        # Format message using new formatter
+        message = format_telegram_message(event, brief, country_info, importance_info)
         
         # Truncate if too long
         if len(message) > max_chars:
@@ -231,19 +211,35 @@ class TelegramPublisher:
         Returns:
             PublishResult with success status and message_id
         """
-        # Check duplicate
+        # Check duplicate (with repost_for_test override)
+        import os
+        allow_repost_for_test = os.getenv("PIPELINE_ALLOW_REPOST_FOR_TEST", "false").lower() == "true"
+        repost_count = 0
+        
+        if allow_repost_for_test:
+            # Count existing repost_test entries
+            repost_count = self.db.query(IntelPublishLog).filter(
+                IntelPublishLog.status == "published",
+                IntelPublishLog.error == "repost_test"
+            ).count()
+        
         existing = self.db.query(IntelPublishLog).filter(
             IntelPublishLog.event_id == event.id,
             IntelPublishLog.status == "published"
         ).first()
         
         if existing:
-            logger.info(f"Event {event.id} already published, skipping")
-            return PublishResult(
-                success=False,
-                status="skipped",
-                error="Event already published"
-            )
+            # Allow repost if PIPELINE_ALLOW_REPOST_FOR_TEST=true and repost_count < 2
+            if allow_repost_for_test and repost_count < 2:
+                logger.info(f"Event {event.id} already published, but allowing repost for test (count: {repost_count + 1}/2)")
+                # Continue to publish, but mark as repost_test
+            else:
+                logger.info(f"Event {event.id} already published, skipping")
+                return PublishResult(
+                    success=False,
+                    status="skipped",
+                    error="Event already published"
+                )
         
         # Check rate limits
         can_publish, rate_limit_error = self._check_rate_limits()
@@ -255,21 +251,161 @@ class TelegramPublisher:
                 error=rate_limit_error
             )
         
+        # Normalize brief to Russian before formatting (A2: ensure all fields are Russian)
+        from apps.intel.services.business_brief_generator import normalize_to_ru
+        from apps.intel.services.translation.free_translate import TranslationError
+        
+        try:
+            brief_normalized = normalize_to_ru(brief)
+            # Check if translation failed for critical fields
+            translation_meta = brief_normalized.get("translation_meta", {})
+            if translation_meta.get("translation_failed"):
+                logger.error(f"Event {event.id} translation failed for critical fields, blocking publication")
+                skip_payload = {
+                    "event_id": str(event.id),
+                    "source_url": brief.get("source_url", ""),
+                    "translation_meta": translation_meta,
+                    "reason": "translation_unavailable"
+                }
+                skip_log = IntelPublishLog(
+                    event_id=event.id,
+                    channel_id="free",
+                    telegram_message_id="",
+                    status="skipped",
+                    error="translation_unavailable",
+                    payload=skip_payload
+                )
+                self.db.add(skip_log)
+                self.db.commit()
+                return PublishResult(
+                    success=False,
+                    status="skipped",
+                    error="translation_unavailable"
+                )
+            brief = brief_normalized
+        except TranslationError as e:
+            logger.error(f"Event {event.id} translation service unavailable: {e}, blocking publication")
+            skip_payload = {
+                "event_id": str(event.id),
+                "source_url": brief.get("source_url", ""),
+                "error": str(e),
+                "reason": "translation_unavailable"
+            }
+            skip_log = IntelPublishLog(
+                event_id=event.id,
+                channel_id="free",
+                telegram_message_id="",
+                status="skipped",
+                error="translation_unavailable",
+                payload=skip_payload
+            )
+            self.db.add(skip_log)
+            self.db.commit()
+            return PublishResult(
+                success=False,
+                status="skipped",
+                error=f"translation_unavailable: {str(e)}"
+            )
+        
         # Format message
         message = self._format_message(event, brief)
         
-        # Strict Russian language check
-        from apps.intel.services.translator import message_is_russian
-        if not message_is_russian(message):
-            logger.error(f"Event {event.id} message is not in Russian! Blocking publication.")
+        # Editorial quality checks (hard rules before publication)
+        from apps.intel.services.editorial_rewriter import validate_editorial_quality, enforce_editorial_quality, rewrite_editorial_ru
+        
+        # CRITICAL: Multiple rewrite passes for complete cleanup
+        # Pass 1: Basic rewrite
+        message = rewrite_editorial_ru(message, event_type=event.event_type, score=event.significance_score if hasattr(event, 'significance_score') else 0)
+        # Pass 2: Additional cleanup for any remaining artifacts
+        message = rewrite_editorial_ru(message, event_type=event.event_type, score=event.significance_score if hasattr(event, 'significance_score') else 0)
+        
+        # Final cleanup: remove any remaining HTML/URL fragments
+        import re
+        message = re.sub(r'<[^>]+>', '', message)  # Remove any remaining HTML
+        message = re.sub(r'https?://[^\s]+', '', message)  # Remove URLs
+        message = re.sub(r'[a-zA-Z0-9_-]+\.(jpg|png|gif|webp|jpeg)\?[^\s]*', '', message, flags=re.IGNORECASE)  # Remove image URLs
+        message = re.sub(r'\s+', ' ', message)  # Normalize whitespace
+        message = message.strip()
+        
+        quality_check = validate_editorial_quality(message)
+        if not quality_check["valid"]:
+            logger.warning(f"Event {event.id} message quality check failed, attempting rewrite: {quality_check['errors']}")
+            # Try to fix quality issues
+            message = enforce_editorial_quality(message, max_iterations=5)  # Increased iterations
+            # Re-check
+            quality_check = validate_editorial_quality(message)
+            if not quality_check["valid"]:
+                logger.error(f"Event {event.id} message quality still fails after rewrite: {quality_check['errors']}")
+                # Check if critical errors (non-Russian) - block publication
+                critical_errors = [e for e in quality_check.get('errors', []) if 'Cyrillic' in e or 'English words' in e]
+                if critical_errors:
+                    logger.error(f"Event {event.id} has critical quality errors, blocking publication: {critical_errors}")
+                    skip_payload = {
+                        "event_id": str(event.id),
+                        "source_url": brief.get("source_url", ""),
+                        "quality_errors": quality_check.get('errors', []),
+                        "reason": "editorial_quality_failed"
+                    }
+                    skip_log = IntelPublishLog(
+                        event_id=event.id,
+                        channel_id="free",
+                        telegram_message_id="",
+                        status="skipped",
+                        error="editorial_quality_failed",
+                        payload=skip_payload
+                    )
+                    self.db.add(skip_log)
+                    self.db.commit()
+                    return PublishResult(
+                        success=False,
+                        status="skipped",
+                        error="editorial_quality_failed"
+                    )
+        
+        # Strict Russian language check (A1: hard gate before sending)
+        from apps.intel.services.translator import message_is_russian, detect_language
+        detected_lang = detect_language(message)
+        cyrillic_count = sum(1 for char in message if '\u0400' <= char <= '\u04FF')
+        total_chars = len([c for c in message if c.isalpha()])
+        ru_ratio = cyrillic_count / total_chars if total_chars > 0 else 0
+        
+        # Hard threshold: at least 30% Cyrillic for Russian text (increased from 25%)
+        is_russian = message_is_russian(message) and ru_ratio >= 0.30
+        
+        if not is_russian:
+            logger.error(f"Event {event.id} message is not in Russian! Blocking publication. "
+                        f"Detected: {detected_lang}, Cyrillic ratio: {ru_ratio:.2%}")
+            
+            # Save skip log with details
+            skip_payload = {
+                "detected_lang": detected_lang,
+                "ru_ratio": ru_ratio,
+                "event_id": str(event.id),
+                "source_url": brief.get("source_url", "") if brief else (event.sources[0] if event.sources else ""),
+                "message_preview": message[:200]
+            }
+            skip_log = IntelPublishLog(
+                event_id=event.id,
+                channel_id="free",
+                telegram_message_id="",
+                status="skipped",
+                error="non_russian_output",
+                payload=skip_payload
+            )
+            self.db.add(skip_log)
+            self.db.commit()
+            
             return PublishResult(
                 success=False,
-                status="failed",
-                error="Message is not in Russian (strict_russian_output policy violation)"
+                status="skipped",
+                error=f"non_russian_output (detected: {detected_lang}, ru_ratio: {ru_ratio:.2%})"
             )
         
         # Send to Telegram
         success, message_id, error = self._send_to_telegram(message)
+        
+        # Determine if this is a repost_test
+        is_repost_test = allow_repost_for_test and existing is not None
         
         # Save to publish log with significance info
         payload = {
@@ -277,7 +413,8 @@ class TelegramPublisher:
             "significance_score": event.significance_score if hasattr(event, 'significance_score') else 0,
             "significance_reason": event.significance_reason if hasattr(event, 'significance_reason') else None,
             "event_type": event.event_type,
-            "eligibility_decision": "accepted" if success else "rejected"
+            "eligibility_decision": "accepted" if success else "rejected",
+            "repost_test": is_repost_test
         }
         
         publish_log = IntelPublishLog(
@@ -286,7 +423,7 @@ class TelegramPublisher:
             telegram_message_id=message_id or "",
             payload=payload,
             status="published" if success else "failed",
-            error=error
+            error="repost_test" if is_repost_test else error  # Mark repost_test in error field
         )
         self.db.add(publish_log)
         
@@ -297,7 +434,10 @@ class TelegramPublisher:
             event.published_at = datetime.utcnow()
             event.telegram_message_id = message_id
             score = event.significance_score if hasattr(event, 'significance_score') else 0
-            logger.info(f"Event {event.id} published to Telegram: message_id={message_id}, score={score}, type={event.event_type}")
+            if is_repost_test:
+                logger.info(f"✅ Event {event.id} republished to Telegram for test (message_id={message_id}, score={score})")
+            else:
+                logger.info(f"✅ Event {event.id} published to Telegram: message_id={message_id}, score={score}, type={event.event_type}")
         
         self.db.commit()
         

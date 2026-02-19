@@ -4,11 +4,56 @@
 version: 1.0
 
 # Source filtering (Steam-only for autopublish)
+# GLOBAL MODE: Expanded domains for high-noise collection
 allowed_domains:
+  # Official Steam
   - store.steampowered.com
   - steamcommunity.com
   - steamdb.info
   - rss.steampowered.com
+  - partner.steamgames.com
+  # Major Gaming Media (EN)
+  - pcgamer.com
+  - ign.com
+  - rockpapershotgun.com
+  - gamesindustry.biz
+  - eurogamer.net
+  - kotaku.com
+  - destructoid.com
+  - gamespot.com
+  - vg247.com
+  - polygon.com
+  - theverge.com
+  - gameinformer.com
+  - giantbomb.com
+  - techraptor.net
+  - nichegamer.com
+  - gamingbolt.com
+  - twinfinite.net
+  - gamerant.com
+  - screenrant.com
+  # International Media
+  - jeuxvideo.com
+  - 3djuegos.com
+  - gamestar.de
+  - gamepressure.com
+  - 4gamer.net
+  - famitsu.com
+  - dtf.ru
+  - stopgame.ru
+  - ixbt.com
+  - igromania.ru
+  - gamer.com.tw
+  - inven.co.kr
+  - playground.ru
+  - kanobu.ru
+  - gamekult.com
+  - multiplayer.it
+  - eurogamer.it
+  # Aggregators
+  - news.google.com
+  - reddit.com
+  - bing.com
 blocked_domains: []
 
 # Event types configuration
@@ -34,8 +79,28 @@ hard_rules:
   output_language: ru
   strict_russian_output: true  # All Telegram messages must be in Russian
 
+# Global mode configuration
+mode: high_noise  # High-noise global collection mode
+
 # Steam relevance filtering
 steam_relevance_required: true  # Only process items relevant to Steam
+relevance:
+  steam_keywords:
+    - steam
+    - valve
+    - steam deck
+    - steam release
+    - steam update
+    - steam discount
+    - steam sale
+    - steam game
+    - steam store
+    - steam community
+    - steamdb
+    - appid
+    - steam app
+  require_steam_mention: true
+  min_relevance_score: 20  # Lowered to increase extraction rate (wide mode)
 
 # Telegram template configuration
 telegram_template:
@@ -59,7 +124,7 @@ moderation:
 
 # Significance scoring and filtering
 significance:
-  min_score_to_autopublish: 55
+  min_score_to_autopublish: 35  # Lowered to increase eligible events
   min_confidence_to_autopublish: 0.75
   always_publish_categories: [funding, publisher_deal]
   never_autopublish_categories: [controversy]

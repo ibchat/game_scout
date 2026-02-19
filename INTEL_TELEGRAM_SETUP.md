@@ -26,11 +26,16 @@ TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_CHAT_ID=your_chat_id_here
 ```
 
-**Example:**
+**Example (DO NOT use these values - they are placeholders):**
 ```env
-TELEGRAM_BOT_TOKEN=8546248502:AAFZwNjcvLfOsClWU-z_8vfPfmSXUS2pUyM
+TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
 TELEGRAM_CHAT_ID=-1001234567890
 ```
+
+**⚠️ SECURITY WARNING:**
+- Never commit actual tokens to git
+- Never hardcode tokens in `docker-compose.yml` (use `${TELEGRAM_BOT_TOKEN}`)
+- If a token was previously committed, rotate it immediately via @BotFather
 
 ### Step 4: Verify Configuration
 

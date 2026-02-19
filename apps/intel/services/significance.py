@@ -16,7 +16,7 @@ def score_event(
     policy: dict = None
 ) -> Tuple[int, str, str, float]:
     """
-    Calculate significance score for an Intel event.
+    Calculate significance score for an Intel event with source weighting.
     
     Args:
         event: IntelEvent to score
@@ -48,10 +48,174 @@ def score_event(
     if category == "other":
         category = _classify_category_from_text(text_lower)
     
-    # Calculate score based on category
+    # FALLBACK: If still "other" and no text, use market_trend as default
+    if category == "other" and not text_lower:
+        category = "market_trend"
+    
+    # Calculate base score based on category
     score, reason, confidence = _calculate_score_by_category(category, text_lower, event)
     
+    # CRITICAL FIX: Ensure minimum baseline score = 25 (no score=0 events)
+    if score == 0:
+        score = 25  # Baseline for any event
+        reason = "Базовый балл события"
+        confidence = 0.5
+    
+    # Apply category weight boost
+    category_boost = _get_category_weight(category)
+    if category_boost == 0:
+        category_boost = 5  # Default category weight if not found
+    score = min(100, score + category_boost)
+    
+    # Apply source weighting (HIGH-NOISE MODE)
+    source_boost = _calculate_source_boost(event, extracted)
+    if source_boost == 0:
+        source_boost = 2  # Default source weight if not found
+    score = min(100, score + source_boost)
+    
+    # Apply recency boost (last 24h)
+    recency_boost = _calculate_recency_boost(event, extracted)
+    score = min(100, score + recency_boost)
+    
+    # Final safety: ensure score >= 25
+    if score < 25:
+        score = 25
+    
+    if category_boost > 0 or source_boost > 0 or recency_boost > 0:
+        boosts = []
+        if category_boost > 0:
+            boosts.append(f"+{category_boost} категория")
+        if source_boost > 0:
+            boosts.append(f"+{source_boost} источник")
+        if recency_boost > 0:
+            boosts.append(f"+{recency_boost} свежесть")
+        reason = f"{reason} ({', '.join(boosts)})"
+    
     return score, reason, category, confidence
+
+
+def _get_category_weight(category: str) -> int:
+    """
+    Get category weight boost for significance scoring.
+    
+    Returns:
+        Boost amount (0-15)
+    """
+    weights = {
+        "release": 10,
+        "funding": 15,
+        "publisher_deal": 12,
+        "market_trend": 8,
+        "controversy": 10,
+        "discount": 5,
+        "patch_major": 8,
+        "early_access": 6,
+        "other": 0
+    }
+    return weights.get(category, 0)
+
+
+def _calculate_recency_boost(event: IntelEvent, extracted: Optional[IntelExtractedItem] = None) -> int:
+    """
+    Calculate recency boost (last 24h events get boost).
+    Uses extracted_at if available (for proper daily run filtering), otherwise event.created_at.
+    
+    Returns:
+        Boost amount (0-10)
+    """
+    from datetime import datetime, timedelta, timezone
+    
+    # Prefer extracted_at for recency (proper daily run filtering)
+    reference_time = None
+    if extracted and hasattr(extracted, 'extracted_at') and extracted.extracted_at:
+        reference_time = extracted.extracted_at
+    elif event.created_at:
+        reference_time = event.created_at
+    
+    if not reference_time:
+        return 0
+    
+    now = datetime.now(timezone.utc)
+    age_hours = (now - reference_time).total_seconds() / 3600
+    
+    if age_hours <= 24:
+        return 10  # Full boost for last 24h
+    elif age_hours <= 48:
+        return 5   # Half boost for 24-48h
+    else:
+        return 0   # No boost for older
+
+
+def _calculate_source_boost(event: IntelEvent, extracted: Optional[IntelExtractedItem] = None) -> int:
+    """
+    Calculate source-based boost for significance score.
+    
+    Returns:
+        Boost amount (0-20)
+    """
+    boost = 0
+    
+    # Get source URL from event or extracted item
+    source_url = ""
+    if event.sources and isinstance(event.sources, list) and len(event.sources) > 0:
+        source_url = event.sources[0]
+    elif extracted and extracted.url_norm:
+        source_url = extracted.url_norm
+    
+    if not source_url:
+        return 0
+    
+    source_lower = source_url.lower()
+    
+    # Official Steam sources: +10
+    official_steam_domains = [
+        "store.steampowered.com",
+        "steamcommunity.com",
+        "rss.steampowered.com"
+    ]
+    if any(domain in source_lower for domain in official_steam_domains):
+        boost = 10
+        return boost
+    
+    # SteamDB: +8
+    if "steamdb.info" in source_lower:
+        boost = 8
+        return boost
+    
+    # Major gaming media: +5
+    major_media_domains = [
+        "pcgamer.com",
+        "ign.com",
+        "gamespot.com",
+        "eurogamer.net",
+        "kotaku.com",
+        "polygon.com",
+        "theverge.com",
+        "rockpapershotgun.com",
+        "gamesindustry.biz"
+    ]
+    if any(domain in source_lower for domain in major_media_domains):
+        boost = 5
+        return boost
+    
+    # Reddit: +3
+    if "reddit.com" in source_lower:
+        boost = 3
+        return boost
+    
+    # Google News: +2
+    if "news.google.com" in source_lower:
+        boost = 2
+        return boost
+    
+    # Funding news: +20 (already handled in category scoring, but extra boost for visibility)
+    # This is handled in category scoring
+    
+    # Global publisher mention: +15 (handled in publisher_deal category)
+    
+    # Minor patch: -20 (handled in category scoring)
+    
+    return boost
 
 
 def _classify_category_from_text(text_lower: str) -> str:
@@ -187,6 +351,6 @@ def _calculate_score_by_category(
         score = 75  # Base score
         return score, "Спорное событие (требует review)", 0.8
     
-    # other: 10-40
-    score = 25  # Default for unknown
+    # other: 25-40 (baseline minimum)
+    score = 30  # Default for unknown (increased from 25 to ensure > baseline)
     return score, "Прочее событие", 0.5

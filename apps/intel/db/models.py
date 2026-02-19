@@ -75,6 +75,19 @@ class IntelSource(Base, TimestampMixin):
     language_hint: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    
+    # Source health tracking fields
+    country: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # ISO country code
+    locale: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # Locale code (en-US, de-DE, etc.)
+    category_hint: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # Category hint
+    weight: Mapped[int] = mapped_column(Integer, nullable=False, server_default="10")  # Source weight for scoring
+    last_error_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Last HTTP error code
+    failure_streak: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")  # Consecutive failures
+    last_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # Last successful collection
+    disabled_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Reason for disabling
+    disabled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # When disabled
+    backoff_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # Backoff expiration
+    blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Reason for blocking (403, etc.)
 
     # Relationships
     raw_items: Mapped[list["IntelRawItem"]] = relationship(
@@ -146,6 +159,11 @@ class IntelExtractedItem(Base):
     url_norm: Mapped[str] = mapped_column(Text, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     meta: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    extracted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=sa.text('now()')
+    )
 
     # Relationships
     raw_item: Mapped["IntelRawItem"] = relationship("IntelRawItem", back_populates="extracted_item")
@@ -156,6 +174,7 @@ class IntelExtractedItem(Base):
     __table_args__ = (
         Index("idx_intel_extracted_items_url_norm", "url_norm"),
         Index("idx_intel_extracted_items_raw_item_id", "raw_item_id"),
+        Index("idx_intel_extracted_items_extracted_at", "extracted_at"),
     )
 
 
@@ -319,6 +338,11 @@ class IntelPublishLog(Base):
         ForeignKey("intel_events.id", ondelete="CASCADE"),
         nullable=False
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=sa.text('now()')
+    )
     published_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -336,6 +360,7 @@ class IntelPublishLog(Base):
     __table_args__ = (
         Index("idx_intel_publish_log_event_id", "event_id"),
         Index("idx_intel_publish_log_published_at", "published_at"),
+        Index("idx_intel_publish_log_created_at", "created_at"),
         Index("idx_intel_publish_log_status", "status"),
     )
 

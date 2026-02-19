@@ -14,9 +14,20 @@ celery_app = Celery(
     backend=CELERY_RESULT_BACKEND,
 )
 
+# Intel schedule mode: daily or hourly
+INTEL_SCHEDULE_MODE = os.getenv("INTEL_SCHEDULE_MODE", "daily")  # daily or hourly
+INTEL_DAILY_RUN_HOUR = int(os.getenv("INTEL_DAILY_RUN_HOUR", "9"))
+INTEL_DAILY_RUN_TZ = os.getenv("INTEL_DAILY_RUN_TZ", "Europe/Madrid")
+
+# Set timezone for Intel daily runs
+if INTEL_SCHEDULE_MODE == "daily":
+    celery_timezone = INTEL_DAILY_RUN_TZ
+else:
+    celery_timezone = os.getenv("CELERY_TIMEZONE", "UTC")
+
 celery_app.conf.update(
-    timezone=os.getenv("CELERY_TIMEZONE", "UTC"),
-    enable_utc=True,
+    timezone=celery_timezone,
+    enable_utc=False if INTEL_SCHEDULE_MODE == "daily" else True,  # Use local timezone for daily
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
@@ -72,9 +83,23 @@ from apps.worker.tasks.publish_steam_intel import publish_steam_intel_task  # no
 # Beat schedule - periodic tasks
 from celery.schedules import crontab
 
-celery_app.conf.beat_schedule = {
-    "publish-steam-intel": {
-        "task": "publish_steam_intel",
-        "schedule": crontab(minute="*/120"),  # Every 2 hours
-    },
-}
+# Intel schedule: daily at 09:05 Europe/Madrid or hourly (every 2 hours)
+INTEL_DAILY_RUN_MINUTE = int(os.getenv("INTEL_DAILY_RUN_MINUTE", "5"))  # Default 09:05
+
+if INTEL_SCHEDULE_MODE == "daily":
+    celery_app.conf.beat_schedule = {
+        "publish-steam-intel-daily": {
+            "task": "publish_steam_intel",
+            "schedule": crontab(hour=INTEL_DAILY_RUN_HOUR, minute=INTEL_DAILY_RUN_MINUTE),  # Daily at 09:05 Europe/Madrid
+        },
+    }
+else:
+    # Hourly mode (legacy): disabled by default, can be enabled via INTEL_RUN_MODE=hourly
+    # Only enable if explicitly requested
+    if os.getenv("INTEL_RUN_MODE") == "hourly":
+        celery_app.conf.beat_schedule = {
+            "publish-steam-intel": {
+                "task": "publish_steam_intel",
+                "schedule": crontab(minute="*/120"),  # Every 2 hours
+            },
+        }

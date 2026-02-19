@@ -185,6 +185,30 @@ try:
     from apps.intel.api import router as intel_router
     app.include_router(intel_router.router, prefix=API_V1)
     logger.info("✅ Intel router included successfully")
+    
+    # Auto-seed Intel sources on startup (idempotent)
+    try:
+        from apps.intel.config import is_intel_enabled
+        from apps.intel.db.seed_sources import seed_intel_sources, get_active_sources_count
+        from apps.db.session import SessionLocal
+        
+        if is_intel_enabled():
+            db = SessionLocal()
+            try:
+                active_count = get_active_sources_count(db)
+                if active_count < 30:
+                    logger.info(f"Auto-seeding Intel sources (current: {active_count}, target: >=30)")
+                    stats = seed_intel_sources(db, force=False)
+                    logger.info(f"Intel sources seed: added={stats['added']}, updated={stats['updated']}, skipped={stats['skipped']}, errors={stats['errors']}")
+                else:
+                    logger.info(f"Intel sources already seeded ({active_count} active sources)")
+            except Exception as seed_err:
+                logger.warning(f"Failed to auto-seed Intel sources: {seed_err}")
+            finally:
+                db.close()
+    except Exception as seed_import_err:
+        logger.warning(f"Could not import seed_sources: {seed_import_err}")
+        
 except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"⚠️ Intel module not available: {e}")
 except Exception as e:

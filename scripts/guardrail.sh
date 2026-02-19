@@ -102,7 +102,8 @@ echo ""
 
 # Check 5: Security - Telegram token leak detection
 echo "5. Checking for Telegram token leaks..."
-TOKEN_PATTERN='[0-9]+:[A-Za-z0-9_-]{30,}'
+# Pattern: 9-10 digits : 30+ alphanumeric chars (Telegram bot token format)
+TOKEN_PATTERN='\d{9,10}:[A-Za-z0-9_-]{30,}'
 TOKEN_LEAKS=$(git ls-files | xargs grep -lE "$TOKEN_PATTERN" 2>/dev/null | grep -vE '\.(md|txt)$' | grep -v 'INTEL_TELEGRAM_SETUP.md' | grep -v 'TELEGRAM_CHAT_ID_SETUP.md' | grep -v 'get_telegram_chat_id.py' || true)
 
 if [ -n "$TOKEN_LEAKS" ]; then
@@ -118,11 +119,16 @@ else
     echo -e "   ${GREEN}✓${NC} No Telegram token leaks detected"
 fi
 
-# Also check docker-compose.yml specifically (should use env vars)
+# Also check docker-compose.yml specifically (should use env vars, not hardcoded)
 if grep -qE "$TOKEN_PATTERN" docker-compose.yml 2>/dev/null; then
-    echo -e "   ${YELLOW}⚠${NC}  WARNING: Token pattern found in docker-compose.yml"
-    echo "   Consider using environment variable reference: \${TELEGRAM_BOT_TOKEN}"
-    # Don't fail, just warn
+    echo -e "   ${RED}✗${NC} CRITICAL: Token pattern found in docker-compose.yml"
+    echo "   ACTION REQUIRED:"
+    echo "   1. Remove hardcoded token from docker-compose.yml"
+    echo "   2. Use environment variable: \${TELEGRAM_BOT_TOKEN}"
+    echo "   3. Set token in .env file (already in .gitignore)"
+    echo "   4. Rotate token via @BotFather"
+    ERRORS+=("Telegram token hardcoded in docker-compose.yml")
+    EXIT_CODE=1
 fi
 echo ""
 

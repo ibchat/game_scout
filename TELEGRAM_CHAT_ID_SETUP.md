@@ -11,7 +11,8 @@ To get your Telegram channel chat ID, you have several options:
 3. Run the helper script:
 
 ```bash
-docker compose exec -T api python scripts/get_telegram_chat_id.py 8546248502:AAFZwNjcvLfOsClWU-z_8vfPfmSXUS2pUyM
+# Replace <YOUR_BOT_TOKEN> with your actual token from @BotFather
+docker compose exec -T api python scripts/get_telegram_chat_id.py <YOUR_BOT_TOKEN>
 ```
 
 The script will show all recent chats, including channel IDs.
@@ -21,15 +22,14 @@ The script will show all recent chats, including channel IDs.
 1. Forward a message from your channel to [@userinfobot](https://t.me/userinfobot)
 2. The bot will reply with the channel chat ID (format: `-1001234567890`)
 
-### Option 3: Manual Configuration
+### Option 3: Manual Configuration (Recommended)
 
 1. Get the chat ID using one of the methods above
-2. Add to `docker-compose.yml` in the `api` service `environment` section:
+2. Add to `.env` file (NOT committed to git):
 
-```yaml
-environment:
-  TELEGRAM_BOT_TOKEN: "8546248502:AAFZwNjcvLfOsClWU-z_8vfPfmSXUS2pUyM"
-  TELEGRAM_CHAT_ID: "-1001234567890"  # Your channel chat ID here
+```env
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=-1001234567890  # Your channel chat ID here
 ```
 
 3. Restart the API container:
@@ -37,6 +37,10 @@ environment:
 ```bash
 docker compose up -d --force-recreate api
 ```
+
+**⚠️ SECURITY:**
+- Never hardcode tokens in `docker-compose.yml` (use `${TELEGRAM_BOT_TOKEN}`)
+- Always use `.env` file for secrets (already in `.gitignore`)
 
 ### Option 4: Auto-Detection (If bot received messages)
 
@@ -57,14 +61,10 @@ curl http://localhost:8000/api/v1/intel/health | jq .telegram_ok
 
 Should return `true` if everything is configured correctly.
 
-## Current Bot Token
-
-- **Bot Username**: `game_scout_bot`
-- **Token**: `8546248502:AAFZwNjcvLfOsClWU-z_8vfPfmSXUS2pUyM`
-
 ## Notes
 
 - Channel chat IDs typically start with `-100` (e.g., `-1001234567890`)
 - Private channel IDs are negative numbers
 - Public channels can use `@channel_username` format, but numeric ID is preferred
-- Never commit tokens or chat IDs to git (they're in docker-compose.yml but should be in .env for production)
+- **Never commit tokens or chat IDs to git** - always use `.env` file (already in `.gitignore`)
+- If a token was previously committed, rotate it immediately via @BotFather

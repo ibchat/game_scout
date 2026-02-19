@@ -63,7 +63,8 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python scripts/get_telegram_chat_id.py <bot_token>")
         print("\nExample:")
-        print("  python scripts/get_telegram_chat_id.py 8546248502:AAFZwNjcvLfOsClWU-z_8vfPfmSXUS2pUyM")
+        print("  python scripts/get_telegram_chat_id.py 1234567890:ABCdefGHIjklMNOpqrsTUVwxyz")
+        print("\n⚠️  Note: Use your actual bot token from @BotFather, not the example above.")
         sys.exit(1)
     
     bot_token = sys.argv[1]

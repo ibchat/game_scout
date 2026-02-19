@@ -97,7 +97,32 @@ def run_orchestrator_smoke() -> SupervisorResult:
     except Exception as e:
         errors.append(f"Error checking collectors: {str(e)}")
     
-    # Check 4: Policy engine can be loaded
+    # Check 4: Run Intel production check (D2: final validation)
+    try:
+        script_path = Path(__file__).parent.parent / "scripts" / "intel_production_check.sh"
+        if script_path.exists():
+            result = subprocess.run(
+                ["bash", str(script_path)],
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minutes max
+            )
+            if result.returncode != 0:
+                errors.append(f"Intel production check failed (exit code {result.returncode})")
+                if result.stderr:
+                    errors.append(f"Production check stderr: {result.stderr[:500]}")
+            else:
+                # Check output for warnings
+                if "WARN" in result.stdout or "⚠" in result.stdout:
+                    warnings.append("Intel production check passed with warnings")
+        else:
+            warnings.append("Intel production check script not found, skipping")
+    except subprocess.TimeoutExpired:
+        errors.append("Intel production check timed out (>5 minutes)")
+    except Exception as e:
+        warnings.append(f"Could not run Intel production check: {str(e)}")
+    
+    # Check 5: Policy engine can be loaded
     try:
         from apps.intel.policy.policy_engine import load_policy
         policy = load_policy()
@@ -283,14 +308,14 @@ def run_orchestrator_smoke() -> SupervisorResult:
         from apps.intel.services.steam_mention_detector import detect_steam_relevance
         from apps.intel.services.translator import message_is_russian
         
-        # Test relevance filter
+        # Test relevance filter (new signature with scoring)
         test_text_steam = "New game released on Steam"
-        is_relevant, _ = detect_steam_relevance(test_text_steam)
+        is_relevant, _, score, _ = detect_steam_relevance(test_text_steam, min_score=30)
         if not is_relevant:
             errors.append("Steam relevance filter not working correctly")
         
         test_text_non_steam = "General gaming news"
-        is_relevant, _ = detect_steam_relevance(test_text_non_steam)
+        is_relevant, _, score, _ = detect_steam_relevance(test_text_non_steam, min_score=30)
         if is_relevant:
             warnings.append("Steam relevance filter may be too permissive")
         
@@ -308,7 +333,25 @@ def run_orchestrator_smoke() -> SupervisorResult:
     except Exception as e:
         warnings.append(f"Could not check relevance filter and translation: {str(e)}")
     
-    # Check 10: Production pipeline check
+    # Check 10: Intel sources count (high-noise mode requires >= 30)
+    try:
+        from apps.db.session import SessionLocal
+        from apps.intel.db.seed_sources import get_active_sources_count
+        
+        db = SessionLocal()
+        try:
+            active_count = get_active_sources_count(db)
+            if active_count < 30:
+                warnings.append(f"Intel sources count is {active_count} (recommend >= 30 for high-noise mode). Run POST /api/v1/intel/sources/seed to add more.")
+            else:
+                details["active_sources"] = active_count
+        finally:
+            db.close()
+    except Exception as e:
+        warnings.append(f"Could not check Intel sources count: {str(e)}")
+    
+    # Check 11: Production pipeline check
+    details = {}
     try:
         import subprocess
         import os
@@ -316,13 +359,24 @@ def run_orchestrator_smoke() -> SupervisorResult:
         script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts", "intel_production_check.sh")
         if os.path.exists(script_path):
             # Run production check script
-            result = subprocess.run(
-                ["bash", script_path],
-                capture_output=True,
-                text=True,
-                timeout=180,  # 3 minutes max
-                cwd=os.path.dirname(os.path.dirname(__file__))
-            )
+            if _is_inside_container():
+                # Inside container: run directly
+                result = subprocess.run(
+                    ["bash", script_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=180,  # 3 minutes max
+                    cwd=os.path.dirname(os.path.dirname(__file__))
+                )
+            else:
+                # On host: run via docker compose
+                result = subprocess.run(
+                    ["docker", "compose", "exec", "-T", config.DOCKER_SERVICE_API, "bash", script_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=180,
+                    cwd=os.path.dirname(os.path.dirname(__file__))
+                )
             
             if result.returncode == 0:
                 details["production_check"] = "passed"
