@@ -279,7 +279,7 @@ def rewrite_editorial_ru(
     # Step 4: Remove double spaces
     text = remove_double_spaces(text)
     
-    # Step 5: Fix common bad translations
+    # Step 5: Fix common bad translations and editorial issues
     # Fix "не помещает зуб" -> "не может конкурировать" or similar
     bad_translations = {
         r'\bне\s+помещает\s+зуб\b': 'не может конкурировать',
@@ -290,9 +290,30 @@ def rewrite_editorial_ru(
         r'\bбыл\s+выпущен\s+в\s+продажу\b': 'вышел в продажу',
         r'\bбыла\s+выпущена\s+в\s+продажу\b': 'вышла в продажу',
         r'\bбыло\s+выпущено\s+в\s+продажу\b': 'вышло в продажу',
+        # Fix duplicate phrases
+        r'\b([^\.]+)\s+\1\b': r'\1',  # Remove exact duplicates
+        r'\b(Кто-то|кто-то)\s+\1\b': r'\1',  # Remove duplicate "Кто-то"
     }
     for pattern, replacement in bad_translations.items():
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    
+    # Remove duplicate sentences (editorial quality)
+    sentences = re.split(r'[.!?]\s+', text)
+    seen_sentences = set()
+    unique_sentences = []
+    for sent in sentences:
+        sent_clean = sent.strip()
+        if sent_clean:
+            sent_lower = sent_clean.lower()
+            # Normalize for comparison (remove punctuation, extra spaces)
+            sent_normalized = re.sub(r'[^\w\s]', '', sent_lower)
+            sent_normalized = re.sub(r'\s+', ' ', sent_normalized).strip()
+            if sent_normalized and sent_normalized not in seen_sentences:
+                unique_sentences.append(sent_clean)
+                seen_sentences.add(sent_normalized)
+    text = ". ".join(unique_sentences)
+    if text and not text.endswith(('.', '!', '?')):
+        text += "."
     
     # Step 6: Final cleanup - remove any remaining artifacts
     text = re.sub(r"([а-яёА-ЯЁ])\s*['']([a-z]+)", r'\1 \2', text)  # Fix remaining mixed artifacts

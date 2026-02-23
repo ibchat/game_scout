@@ -201,58 +201,137 @@ def format_telegram_message(
     # Get score
     score = event.significance_score if hasattr(event, 'significance_score') else 0
     
-    # Build message parts
+    # Build message parts - PROFESSIONAL EDITORIAL FORMAT
     message_parts = []
     
-    # NEW FORMAT (G): First line with emoji, category, and title
-    # Ensure title is meaningful
+    # Clean and normalize title - remove duplicates, fix grammar
     if not title or len(title) < 3:
         title = "Новость Steam"
-    title_line = f"{importance_info['emoji']} [{category_info['label_ru']}] {title}"
-    message_parts.append(title_line)
     
-    # Short summary immediately after title (1 sentence) - only if meaningful
-    if executive_summary and len(executive_summary) > 10:
-        message_parts.append(executive_summary)
-        message_parts.append("")  # Empty line
+    # Remove duplicate words/phrases from title
+    import re
+    title_words = title.split()
+    title_clean = []
+    prev_word = ""
+    for word in title_words:
+        if word.lower() != prev_word.lower():
+            title_clean.append(word)
+            prev_word = word
+    title = " ".join(title_clean)
     
-    # Tags line: Country/Locale tags • Steam • SignalType
-    tags_parts = [f"🌍 {country_info.get('country_name_ru', 'Глобально')}"]
-    tags_parts.append("🧩 Steam")
-    tags_parts.append(f"🧷 {category_info['label_ru']}")
-    message_parts.append(" • ".join(tags_parts))
-    message_parts.append("")  # Empty line
+    # Title line - NO EMOJI, NO BRACKETS, clean title only
+    message_parts.append(title)
+    message_parts.append("")  # Empty line after title
     
-    # What happened - only if meaningful (not empty, not "нет данных", not duplicate of title)
-    if what_happened and len(what_happened) > 10 and what_happened.lower() != title.lower():
-        message_parts.append("Что произошло:")
-        message_parts.append(what_happened)
-        message_parts.append("")  # Empty line
+    # Main content - use what_happened or executive_summary (whichever is better)
+    # Remove HTML first and clean "нет данных"
+    what_happened_clean = ""
+    if what_happened and what_happened not in ["нет данных", "Нет данных", "N/A", ""]:
+        what_happened_clean = re.sub(r'<[^>]+>', '', what_happened).strip()
     
-    # Why it matters - only if meaningful
-    if why_it_matters and len(why_it_matters) > 10:
-        message_parts.append("Почему это важно:")
-        message_parts.append(why_it_matters)
-        message_parts.append("")  # Empty line
+    executive_summary_clean = ""
+    if executive_summary and executive_summary not in ["нет данных", "Нет данных", "N/A", ""]:
+        executive_summary_clean = re.sub(r'<[^>]+>', '', executive_summary).strip()
     
-    # Key points - only if we have meaningful points
-    if key_points:
+    main_content = ""
+    main_words = set()
+    title_words_set = set(re.sub(r'[^\w\s]', '', title.lower()).split())
+    
+    # Prefer what_happened if it's meaningful and not duplicate
+    if what_happened_clean and len(what_happened_clean) > 20:
+        # Check if what_happened is not just a duplicate of title
+        what_words_set = set(re.sub(r'[^\w\s]', '', what_happened_clean.lower()).split())
+        overlap = len(title_words_set & what_words_set) / max(len(title_words_set), 1) if title_words_set else 0
+        if overlap < 0.75:  # Less than 75% overlap (more lenient)
+            main_content = what_happened_clean
+            main_words = what_words_set
+        elif executive_summary_clean and len(executive_summary_clean) > 20:
+            # Fallback to executive_summary if what_happened is too similar to title
+            main_content = executive_summary_clean
+            main_words = set(re.sub(r'[^\w\s]', '', executive_summary_clean.lower()).split())
+    elif executive_summary_clean and len(executive_summary_clean) > 20:
+        # Use executive_summary if what_happened is not available
+        main_content = executive_summary_clean
+        main_words = set(re.sub(r'[^\w\s]', '', executive_summary_clean.lower()).split())
+    
+    # Clean main content - remove duplicates, fix grammar, remove HTML entities
+    if main_content:
+        # Remove HTML entities
+        main_content = main_content.replace('&nbsp;', ' ')
+        main_content = main_content.replace('&amp;', '&')
+        main_content = main_content.replace('&lt;', '<')
+        main_content = main_content.replace('&gt;', '>')
+        main_content = main_content.replace('&quot;', '"')
+        
+        # Remove duplicate sentences
+        sentences = re.split(r'[.!?]\s+', main_content)
+        seen = set()
+        unique_sentences = []
+        for sent in sentences:
+            sent_clean = sent.strip()
+            if sent_clean:
+                sent_normalized = re.sub(r'[^\w\s]', '', sent_clean.lower())
+                sent_normalized = re.sub(r'\s+', ' ', sent_normalized).strip()
+                if sent_normalized and sent_normalized not in seen:
+                    unique_sentences.append(sent_clean)
+                    seen.add(sent_normalized)
+        
+        if unique_sentences:
+            main_content = ". ".join(unique_sentences)
+            if main_content and not main_content.endswith(('.', '!', '?')):
+                main_content += "."
+            
+            # Final cleanup - remove extra spaces
+            main_content = re.sub(r'\s+', ' ', main_content).strip()
+            
+            message_parts.append(main_content)
+            message_parts.append("")  # Empty line
+    
+    # Why it matters - only if adds value and not duplicate
+    if why_it_matters and len(why_it_matters) > 20:
+        why_it_matters_clean = re.sub(r'<[^>]+>', '', why_it_matters).strip()
+        if why_it_matters_clean and len(why_it_matters_clean) > 20:
+            # Check if it's not duplicate of main content
+            why_words = set(re.sub(r'[^\w\s]', '', why_it_matters_clean.lower()).split())
+            overlap = len(main_words & why_words) / max(len(why_words), 1) if main_words and why_words else 0
+            if overlap < 0.6:  # Less than 60% overlap
+                message_parts.append(why_it_matters_clean)
+                message_parts.append("")  # Empty line
+    
+    # Key points - only meaningful, non-duplicate points, NO HTML
+    meaningful_points = []
+    seen_points = set()
+    for point in key_points[:5]:  # Max 5 points
+        if point and len(point) > 15:
+            # Remove HTML tags from point
+            point_clean = re.sub(r'<[^>]+>', '', point).strip()
+            point_clean = re.sub(r'\s+', ' ', point_clean).strip()
+            
+            if len(point_clean) > 15:
+                point_lower = point_clean.lower()
+                # Check if not duplicate of title or main content
+                if point_lower not in seen_points:
+                    # Check overlap with existing content
+                    point_words = set(re.sub(r'[^\w\s]', '', point_lower).split())
+                    title_overlap = len(point_words & title_words_set) / max(len(point_words), 1) if title_words_set else 0
+                    main_overlap = len(point_words & main_words) / max(len(point_words), 1) if main_content and main_words else 0
+                    if title_overlap < 0.7 and main_overlap < 0.7:
+                        meaningful_points.append(point_clean)
+                        seen_points.add(point_lower)
+    
+    if meaningful_points:
         message_parts.append("Ключевые факты:")
-        for point in key_points[:6]:  # Max 6 points
-            if point and len(point) > 10:  # Only meaningful points
-                message_parts.append(f"• {point}")
-        if len([p for p in key_points[:6] if p and len(p) > 10]) > 0:
-            message_parts.append("")  # Empty line only if we added points
+        for point in meaningful_points:
+            message_parts.append(f"• {point}")
+        message_parts.append("")  # Empty line
     
-    # Insight line (light humor for high-score events) - only if meaningful
-    if insight_line and len(insight_line) > 10:
-        message_parts.append("Инсайт:")
+    # Insight line - only for high-score events, only if meaningful
+    if insight_line and len(insight_line) > 15 and score >= 70:
         message_parts.append(insight_line)
         message_parts.append("")  # Empty line
     
-    # Source URL - CRITICAL: always include if available
+    # Source URL - always at the end, clean format
     if source_url and source_url.startswith(('http://', 'https://')):
-        message_parts.append("Источник:")
         message_parts.append(source_url)
     else:
         # Try to get from event if not in brief
@@ -260,19 +339,11 @@ def format_telegram_message(
             if isinstance(event.sources, list) and event.sources:
                 source_url = str(event.sources[0]).strip()
                 if source_url.startswith(('http://', 'https://')):
-                    message_parts.append("Источник:")
                     message_parts.append(source_url)
-                else:
-                    message_parts.append("Источник: нет данных")
             else:
                 source_url = str(event.sources).strip()
                 if source_url.startswith(('http://', 'https://')):
-                    message_parts.append("Источник:")
                     message_parts.append(source_url)
-                else:
-                    message_parts.append("Источник: нет данных")
-        else:
-            message_parts.append("Источник: нет данных")
     
     message = "\n".join(message_parts)
     
