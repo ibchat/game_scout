@@ -125,6 +125,6 @@ moderation:
 # Significance scoring and filtering
 significance:
   min_score_to_autopublish: 35  # Lowered to increase eligible events
-  min_confidence_to_autopublish: 0.75
+  min_confidence_to_autopublish: 0.7  # Lowered from 0.75 to 0.7 to allow discount events (confidence 0.75+)
   always_publish_categories: [funding, publisher_deal]
   never_autopublish_categories: [controversy]

@@ -314,21 +314,26 @@ def _calculate_score_by_category(
     # discount: 35-65
     if category == "discount":
         score = 50  # Base score
+        confidence = 0.75  # Base confidence (meets min_confidence threshold)
         # Try to extract discount percentage
         discount_match = re.search(r'(\d+)%', text_lower)
         if discount_match:
             discount_pct = int(discount_match.group(1))
             if discount_pct >= 75:
                 score = 65
+                confidence = 0.85  # High confidence for major discounts
             elif discount_pct >= 50:
                 score = 55
                 # +10 boost for 50%+ discount
                 score = min(100, score + 10)
+                confidence = 0.8  # Good confidence for significant discounts
             elif discount_pct >= 25:
                 score = 45
+                confidence = 0.75  # Meets threshold
             else:
                 score = 35
-        return score, f"Скидка", 0.7
+                confidence = 0.75  # Meets threshold
+        return score, f"Скидка", confidence
     
     # patch_major: 30-70
     if category == "patch_major":
@@ -352,5 +357,11 @@ def _calculate_score_by_category(
         return score, "Спорное событие (требует review)", 0.8
     
     # other: 25-40 (baseline minimum)
+    # Try to reclassify as market_trend if has any Steam-related content
+    if "steam" in text_lower or "valve" in text_lower or "deck" in text_lower:
+        category = "market_trend"
+        score = 55  # Market trend base score
+        return score, "Тренд рынка (переклассифицировано)", 0.7
+    
     score = 30  # Default for unknown (increased from 25 to ensure > baseline)
     return score, "Прочее событие", 0.5

@@ -214,8 +214,8 @@ def create_or_update_event(
         
         # Calculate eligibility based on significance thresholds
         sig_config = policy.get("significance", {})
-        min_score = sig_config.get("min_score_to_autopublish", 55)
-        min_confidence = sig_config.get("min_confidence_to_autopublish", 0.75)
+        min_score = sig_config.get("min_score_to_autopublish", 35)  # Use policy value, default 35
+        min_confidence = sig_config.get("min_confidence_to_autopublish", 0.7)  # Use policy value, default 0.7
         always_publish = sig_config.get("always_publish_categories", [])
         never_autopublish = sig_config.get("never_autopublish_categories", [])
         
@@ -479,8 +479,8 @@ def run_pipeline(
         # Step 4: Calculate significance for all events (if not already calculated)
         logger.info(f"[INTEL][SCORE] Calculating significance for {len(events)} events")
         sig_config = policy.get("significance", {})
-        min_score = sig_config.get("min_score_to_autopublish", 55)
-        min_confidence = sig_config.get("min_confidence_to_autopublish", 0.75)
+        min_score = sig_config.get("min_score_to_autopublish", 35)  # Use policy value, default 35
+        min_confidence = sig_config.get("min_confidence_to_autopublish", 0.7)  # Use policy value, default 0.7
         always_publish = sig_config.get("always_publish_categories", [])
         never_autopublish = sig_config.get("never_autopublish_categories", [])
         
