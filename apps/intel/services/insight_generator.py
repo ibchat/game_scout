@@ -1,10 +1,12 @@
 """
 Insight Generator
-Generates light, smart humor lines for high-score events.
-Controlled humor layer - only for score >= 70 and specific event types.
+Generates light, smart humor lines for events.
+Uses context-aware selection and rotation for variety.
 """
 import logging
-from typing import Optional, Dict
+import hashlib
+import re
+from typing import Optional, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,10 @@ INSIGHT_LINES = {
         "Ещё один день в мире игровой индустрии.",
         "Steam остаётся центром игрового мира.",
         "Интересно, что будет дальше.",
+        "Рынок игр не стоит на месте — это видно каждый день.",
+        "Steam продолжает доказывать, что он главная платформа.",
+        "Каждое событие добавляет новый штрих к картине индустрии.",
+        "Игровая индустрия в движении — и это хорошо.",
     ],
     "discount": [
         "Скидки — это не просто снижение цены, это стратегия.",
@@ -66,6 +72,94 @@ INSIGHT_LINES = {
 }
 
 
+def _extract_keywords(text: str) -> List[str]:
+    """
+    Extract relevant keywords from text for context matching.
+    
+    Args:
+        text: Text to analyze
+    
+    Returns:
+        List of relevant keywords (lowercased)
+    """
+    if not text:
+        return []
+    
+    # Common gaming/Steam keywords
+    gaming_keywords = [
+        "steam", "deck", "valve", "game", "игра", "релиз", "release",
+        "скидка", "discount", "sale", "обновление", "update", "patch",
+        "инвестиции", "funding", "сделка", "deal", "тренд", "trend",
+        "рынок", "market", "индустрия", "industry"
+    ]
+    
+    text_lower = text.lower()
+    found_keywords = [kw for kw in gaming_keywords if kw in text_lower]
+    
+    # Also extract significant words (3+ chars, not common stop words)
+    words = re.findall(r'\b\w{3,}\b', text_lower)
+    stop_words = {"the", "and", "for", "are", "but", "not", "you", "all", "can", "her", "was", "one", "our", "out", "day", "get", "has", "him", "his", "how", "its", "may", "new", "now", "old", "see", "two", "who", "way", "use", "her", "she", "many", "some", "time", "very", "when", "come", "here", "just", "like", "long", "make", "much", "over", "such", "take", "than", "them", "well", "were", "what", "know", "want", "been", "good", "much", "some", "time", "very", "when", "come", "here", "just", "like", "long", "make", "much", "over", "such", "take", "than", "them", "well", "were", "what", "know", "want", "been", "good"}
+    significant_words = [w for w in words if w not in stop_words and len(w) >= 3][:5]
+    
+    return found_keywords + significant_words
+
+
+def _select_contextual_line(
+    lines: List[str],
+    keywords: List[str],
+    event_type: str,
+    score: int
+) -> int:
+    """
+    Select line index based on context and rotation.
+    
+    Uses:
+    1. Keywords for contextual relevance
+    2. Score for appropriateness level
+    3. Hash-based rotation for variety
+    
+    Args:
+        lines: Available insight lines
+        keywords: Extracted keywords from title/context
+        event_type: Event type
+        score: Significance score
+    
+    Returns:
+        Line index
+    """
+    if not lines:
+        return 0
+    
+    # Create rotation seed from keywords and event type (deterministic but varied)
+    seed_str = f"{event_type}_{'_'.join(sorted(keywords[:3]))}"
+    seed_hash = int(hashlib.md5(seed_str.encode()).hexdigest()[:8], 16)
+    
+    # Score-based filtering: which lines are appropriate
+    if score >= 70:
+        # High score: all lines available
+        available_range = (0, len(lines))
+    elif score >= 55:
+        # Medium score: middle 60% of lines
+        start = len(lines) // 5
+        end = (len(lines) * 4) // 5
+        available_range = (start, max(start + 1, end))
+    else:
+        # Low score: first 40% of lines (most neutral)
+        end = max(1, (len(lines) * 2) // 5)
+        available_range = (0, end)
+    
+    start_idx, end_idx = available_range
+    available_lines = list(range(start_idx, end_idx))
+    
+    if not available_lines:
+        available_lines = [0]
+    
+    # Use hash for rotation within available lines
+    line_index = available_lines[seed_hash % len(available_lines)]
+    
+    return min(line_index, len(lines) - 1)
+
+
 def generate_insight_line(
     event_type: str,
     score: int,
@@ -74,6 +168,7 @@ def generate_insight_line(
 ) -> Optional[str]:
     """
     Generate light, smart humor line for ALL events.
+    Uses context-aware selection and rotation for variety.
     
     Rules:
     - For ALL events (no score threshold)
@@ -82,13 +177,14 @@ def generate_insight_line(
     - No sarcasm
     - No toxicity
     - Light, smart humor
-    - More neutral for low scores, more impactful for high scores
+    - Context-aware: uses keywords from title
+    - Rotation: hash-based selection for variety
     
     Args:
         event_type: Event type
         score: Significance score
-        title: Event title (for context, not used yet)
-        context: Additional context (not used yet)
+        title: Event title (used for context matching)
+        context: Additional context (optional)
     
     Returns:
         Insight line or None if no lines available
@@ -98,28 +194,12 @@ def generate_insight_line(
     if not lines:
         return None
     
-    # Select line based on score
-    # Low scores (32-54): more neutral, informative (first 1-2 lines)
-    # Medium scores (55-69): light humor (middle lines)
-    # High scores (70+): more impactful, smart humor (all lines)
+    # Extract keywords from title for context matching
+    text_for_keywords = (title or "") + (" " + context if context else "")
+    keywords = _extract_keywords(text_for_keywords)
     
-    if score >= 70:
-        # High score: use full range of lines
-        line_index = (score - 70) % len(lines)
-    elif score >= 55:
-        # Medium score: use middle lines (lighter humor)
-        mid_start = len(lines) // 3
-        mid_end = (len(lines) * 2) // 3
-        mid_range = max(1, mid_end - mid_start)
-        line_index = mid_start + ((score - 55) % mid_range)
-    else:
-        # Low score: use first lines (most neutral)
-        # Use first 1-2 lines for very low scores
-        num_neutral = min(2, len(lines))
-        line_index = (score - 32) % num_neutral if num_neutral > 0 else 0
-    
-    # Ensure index is valid
-    line_index = min(line_index, len(lines) - 1)
+    # Select line using context and rotation
+    line_index = _select_contextual_line(lines, keywords, event_type, score)
     
     insight = lines[line_index]
     
