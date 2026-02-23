@@ -8,7 +8,8 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 from apps.intel.db.models import IntelEvent, IntelExtractedItem
-from apps.intel.policy.policy_engine import load_policy, get_policy_brief_for_llm
+from apps.intel.policy.policy_engine import load_policy
+from apps.intel.policy.policy_brief import get_policy_brief_for_llm
 from apps.intel.config import INTEL_LLM_PROVIDER, INTEL_LLM_MODEL_STRONG
 
 logger = logging.getLogger(__name__)
