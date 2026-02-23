@@ -100,7 +100,7 @@ relevance:
     - appid
     - steam app
   require_steam_mention: true
-  min_relevance_score: 20  # Lowered to increase extraction rate (wide mode)
+  min_relevance_score: 18  # Lowered by 10% (was 20) to increase extraction rate
 
 # Telegram template configuration
 telegram_template:
@@ -120,11 +120,11 @@ limits:
 # Moderation rules
 moderation:
   unresolved_entity_policy: needs_review
-  low_confidence_threshold: 0.75
+  low_confidence_threshold: 0.68  # Lowered by 10% (was 0.75)
 
 # Significance scoring and filtering
 significance:
-  min_score_to_autopublish: 35  # Lowered to increase eligible events
-  min_confidence_to_autopublish: 0.7  # Lowered from 0.75 to 0.7 to allow discount events (confidence 0.75+)
+  min_score_to_autopublish: 32  # Lowered by 10% (was 35) to increase eligible events
+  min_confidence_to_autopublish: 0.63  # Lowered by 10% (was 0.7) to allow more events
   always_publish_categories: [funding, publisher_deal]
   never_autopublish_categories: [controversy]
