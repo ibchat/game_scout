@@ -187,27 +187,68 @@ try:
     logger.info("✅ Intel router included successfully")
     
     # Auto-seed Intel sources on startup (idempotent)
+    # Also check alembic revision and key columns
     try:
         from apps.intel.config import is_intel_enabled
         from apps.intel.db.seed_sources import seed_intel_sources, get_active_sources_count
         from apps.db.session import SessionLocal
+        from sqlalchemy import text, inspect
         
         if is_intel_enabled():
             db = SessionLocal()
             try:
+                # A4: Check alembic current revision
+                try:
+                    result = db.execute(text("SELECT version_num FROM alembic_version ORDER BY version_num DESC LIMIT 1"))
+                    row = result.fetchone()
+                    alembic_rev = row[0] if row else None
+                    logger.info(f"[INTEL] Alembic current revision: {alembic_rev}")
+                    
+                    # Check if we're at head (017)
+                    if alembic_rev and "017" not in str(alembic_rev):
+                        logger.warning(f"[INTEL] Alembic revision is {alembic_rev}, expected 017_created_at_publish_log. Run: alembic upgrade head")
+                except Exception as alembic_err:
+                    logger.warning(f"[INTEL] Could not check alembic revision: {alembic_err}")
+                
+                # A4: Check key columns existence
+                try:
+                    inspector = inspect(db.bind)
+                    
+                    # Check intel_extracted_items.extracted_at
+                    extracted_cols = [col['name'] for col in inspector.get_columns('intel_extracted_items')]
+                    extracted_at_exists = 'extracted_at' in extracted_cols
+                    logger.info(f"[INTEL] intel_extracted_items.extracted_at exists: {extracted_at_exists}")
+                    
+                    # Check intel_publish_log.created_at
+                    publish_cols = [col['name'] for col in inspector.get_columns('intel_publish_log')]
+                    created_at_exists = 'created_at' in publish_cols
+                    logger.info(f"[INTEL] intel_publish_log.created_at exists: {created_at_exists}")
+                    
+                    # Check intel_sources health fields
+                    source_cols = [col['name'] for col in inspector.get_columns('intel_sources')]
+                    country_exists = 'country' in source_cols
+                    weight_exists = 'weight' in source_cols
+                    logger.info(f"[INTEL] intel_sources.country exists: {country_exists}, weight exists: {weight_exists}")
+                    
+                    if not extracted_at_exists or not created_at_exists or not country_exists:
+                        logger.warning(f"[INTEL] ⚠️  Missing key columns! Run migrations 015-017: alembic upgrade head")
+                except Exception as col_check_err:
+                    logger.warning(f"[INTEL] Could not check column existence: {col_check_err}")
+                
+                # Auto-seed sources
                 active_count = get_active_sources_count(db)
                 if active_count < 30:
-                    logger.info(f"Auto-seeding Intel sources (current: {active_count}, target: >=30)")
+                    logger.info(f"[INTEL] Auto-seeding Intel sources (current: {active_count}, target: >=30)")
                     stats = seed_intel_sources(db, force=False)
-                    logger.info(f"Intel sources seed: added={stats['added']}, updated={stats['updated']}, skipped={stats['skipped']}, errors={stats['errors']}")
+                    logger.info(f"[INTEL] Sources seed: added={stats['added']}, updated={stats['updated']}, skipped={stats['skipped']}, errors={stats['errors']}")
                 else:
-                    logger.info(f"Intel sources already seeded ({active_count} active sources)")
+                    logger.info(f"[INTEL] Sources already seeded ({active_count} active sources)")
             except Exception as seed_err:
-                logger.warning(f"Failed to auto-seed Intel sources: {seed_err}")
+                logger.warning(f"[INTEL] Failed to auto-seed Intel sources: {seed_err}")
             finally:
                 db.close()
     except Exception as seed_import_err:
-        logger.warning(f"Could not import seed_sources: {seed_import_err}")
+        logger.warning(f"[INTEL] Could not import seed_sources: {seed_import_err}")
         
 except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"⚠️ Intel module not available: {e}")
