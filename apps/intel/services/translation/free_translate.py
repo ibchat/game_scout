@@ -20,6 +20,7 @@ class TranslationError(Exception):
 def detect_language(text: str) -> str:
     """
     Simple language detection (heuristic).
+    Improved: detects mixed English/Russian text and treats as English (needs translation).
     
     Args:
         text: Text to analyze
@@ -30,15 +31,24 @@ def detect_language(text: str) -> str:
     if not text:
         return 'other'
     
-    # Simple heuristic: check for Cyrillic characters
+    # Simple heuristic: check for Cyrillic and Latin characters
     cyrillic_count = sum(1 for char in text if '\u0400' <= char <= '\u04FF')
+    latin_count = sum(1 for char in text if ('\u0041' <= char <= '\u005A') or ('\u0061' <= char <= '\u007A'))
     total_chars = len([c for c in text if c.isalpha()])
     
     if total_chars > 0:
         cyrillic_ratio = cyrillic_count / total_chars
-        if cyrillic_ratio > 0.3:  # More than 30% Cyrillic
+        latin_ratio = latin_count / total_chars
+        
+        # If significant Latin (English) content, treat as English (needs translation)
+        # Even if there's some Cyrillic, if Latin > 20%, it's likely mixed and needs translation
+        if latin_ratio > 0.2:  # More than 20% Latin = needs translation
+            return 'en'
+        elif cyrillic_ratio > 0.5:  # More than 50% Cyrillic = Russian
             return 'ru'
-        elif cyrillic_ratio < 0.1:  # Less than 10% Cyrillic
+        elif cyrillic_ratio > 0.3:  # 30-50% Cyrillic = likely Russian
+            return 'ru'
+        elif latin_ratio > 0.1:  # 10-20% Latin = likely English
             return 'en'
     
     return 'other'

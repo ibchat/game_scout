@@ -69,36 +69,50 @@ def translate_to_russian(text: str) -> Tuple[str, Dict[str, Any]]:
     
     STRICT RULE: Must return Russian text, never original non-Russian text.
     
+    IMPROVED: Always translates if text contains significant English content (>20% Latin).
+    
     Returns:
         Tuple of (translated_text, meta_dict)
     """
     if not text:
         return "нет данных", {"translation_failed": True, "error": "empty_text"}
     
-    # Check if already Russian
+    # Check if already Russian - improved detection
     detected = detect_language(text)
-    if detected == "ru":
-        return text, {"translation_failed": False, "detected_lang": "ru", "already_russian": True}
     
-    # Try to translate using free service
-    try:
-        from apps.intel.services.translation.free_translate import translate_to_ru, TranslationError
-        translated, meta = translate_to_ru(text, detected)
-        # Verify translation is actually Russian
-        if detect_language(translated) == "ru":
-            meta["translation_failed"] = False
-            return translated, meta
-        else:
-            logger.warning(f"Translation result is not Russian, using fallback template")
-            return "нет данных", {"translation_failed": True, "error": "translation_not_russian", **meta}
-    except TranslationError as e:
-        logger.error(f"Translation failed: {e}, using fallback template")
-        # Return Russian template instead of original text (strict rule)
-        return "нет данных", {"translation_failed": True, "error": str(e)}
-    except Exception as e:
-        logger.error(f"Translation failed: {e}, using fallback template")
-        # Return Russian template instead of original text (strict rule)
-        return "нет данных", {"translation_failed": True, "error": str(e)}
+    # CRITICAL: If detected as 'en' or 'other', always translate
+    # Even if detected as 'ru', check if there's significant English content
+    import re
+    latin_count = sum(1 for char in text if ('\u0041' <= char <= '\u005A') or ('\u0061' <= char <= '\u007A'))
+    total_alpha = len([c for c in text if c.isalpha()])
+    latin_ratio = latin_count / total_alpha if total_alpha > 0 else 0
+    
+    # If significant English content (>20%), always translate
+    if detected != "ru" or latin_ratio > 0.2:
+        # Try to translate using free service
+        try:
+            from apps.intel.services.translation.free_translate import translate_to_ru, TranslationError
+            # Force detection as 'en' if mixed
+            source_lang = detected if detected != "ru" else ("en" if latin_ratio > 0.2 else "ru")
+            translated, meta = translate_to_ru(text, source_lang)
+            # Verify translation is actually Russian
+            if detect_language(translated) == "ru":
+                meta["translation_failed"] = False
+                return translated, meta
+            else:
+                logger.warning(f"Translation result is not Russian, using fallback template")
+                return "нет данных", {"translation_failed": True, "error": "translation_not_russian", **meta}
+        except TranslationError as e:
+            logger.error(f"Translation failed: {e}, using fallback template")
+            # Return Russian template instead of original text (strict rule)
+            return "нет данных", {"translation_failed": True, "error": str(e)}
+        except Exception as e:
+            logger.error(f"Translation failed: {e}, using fallback template")
+            # Return Russian template instead of original text (strict rule)
+            return "нет данных", {"translation_failed": True, "error": str(e)}
+    
+    # Truly Russian text
+    return text, {"translation_failed": False, "detected_lang": "ru", "already_russian": True}
 
 
 def normalize_to_ru(brief: Dict[str, Any]) -> Dict[str, Any]:
@@ -402,16 +416,19 @@ def generate_business_brief(event: IntelEvent, db_session) -> Dict[str, Any]:
             key_points = [s.strip() for s in sentences[:3] if s.strip() and len(s.strip()) > 20]
     
     # Build brief (all fields must be Russian)
-    title = event.title_ru[:100] if event.title_ru else "Новость Steam"
-    what_happened = event.what_happened_ru or (source_text[:500] if source_text != "нет данных" else "нет данных")
-    why_it_matters = event.why_it_matters_ru or "нет данных"
+    # CRITICAL: Always translate, even if title_ru exists (it might be partial English)
+    title_raw = event.title_ru[:100] if event.title_ru else (event.title_en[:100] if hasattr(event, 'title_en') and event.title_en else "Новость Steam")
+    what_happened_raw = event.what_happened_ru or (source_text[:500] if source_text != "нет данных" else "нет данных")
+    why_it_matters_raw = event.why_it_matters_ru or "нет данных"
     
     # Normalize all fields to Russian (B1: unified normalization)
-    title, title_meta = translate_to_russian(title)
-    what_happened, what_meta = translate_to_russian(what_happened)
-    if why_it_matters != "нет данных":
-        why_it_matters, why_meta = translate_to_russian(why_it_matters)
+    # Always translate to ensure Russian, even if field seems Russian
+    title, title_meta = translate_to_russian(title_raw)
+    what_happened, what_meta = translate_to_russian(what_happened_raw)
+    if why_it_matters_raw != "нет данных":
+        why_it_matters, why_meta = translate_to_russian(why_it_matters_raw)
     else:
+        why_it_matters = "нет данных"
         why_meta = {"translation_failed": False, "already_russian": True}
     
     # Translate key points if needed
