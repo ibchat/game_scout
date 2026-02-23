@@ -348,9 +348,9 @@ def format_telegram_message(
             message_parts.append(f"• {point}")
         message_parts.append("")  # Empty line
     
-    # Insight line - only for high-score events, only if meaningful
+    # Insight line - for ALL events (if available)
     # Add "Инсайт:" prefix for clarity
-    if insight_line and len(insight_line) > 15 and score >= 70:
+    if insight_line and len(insight_line) > 10:
         message_parts.append(f"Инсайт: {insight_line}")
         message_parts.append("")  # Empty line
     

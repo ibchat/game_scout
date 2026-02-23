@@ -479,15 +479,14 @@ def generate_business_brief(event: IntelEvent, db_session) -> Dict[str, Any]:
             executive_summary = executive_summary_ru
             translation_meta["executive_summary_meta"] = exec_meta
     
-    # Generate insight line (light humor) for high-score events
-    insight_line = None
-    if event_score >= 70:
-        from apps.intel.services.insight_generator import generate_insight_line
-        insight_line = generate_insight_line(
-            event_type=signal_type,
-            score=event_score,
-            title=title
-        )
+    # Generate insight line (light humor) for ALL events
+    # More neutral for low scores, more impactful for high scores
+    from apps.intel.services.insight_generator import generate_insight_line
+    insight_line = generate_insight_line(
+        event_type=signal_type,
+        score=event_score,
+        title=title
+    )
     
     return {
         "title": title,

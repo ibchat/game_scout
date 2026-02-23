@@ -47,6 +47,9 @@ INSIGHT_LINES = {
         "Каждая новость — это часть большой картины рынка.",
         "Steam-экосистема показывает свою динамичность.",
         "Новости приходят, рынок реагирует — всё как обычно.",
+        "Ещё один день в мире игровой индустрии.",
+        "Steam остаётся центром игрового мира.",
+        "Интересно, что будет дальше.",
     ],
     "discount": [
         "Скидки — это не просто снижение цены, это стратегия.",
@@ -70,15 +73,16 @@ def generate_insight_line(
     context: Optional[str] = None
 ) -> Optional[str]:
     """
-    Generate light, smart humor line for high-score events.
+    Generate light, smart humor line for ALL events.
     
     Rules:
-    - Only for score >= 70
-    - Only for specific event types: release, funding, controversy, market_trend, publisher_deal
+    - For ALL events (no score threshold)
+    - For all event types
     - 1 line, max 120 characters
     - No sarcasm
     - No toxicity
     - Light, smart humor
+    - More neutral for low scores, more impactful for high scores
     
     Args:
         event_type: Event type
@@ -87,26 +91,35 @@ def generate_insight_line(
         context: Additional context (not used yet)
     
     Returns:
-        Insight line or None if conditions not met
+        Insight line or None if no lines available
     """
-    # Only for high-score events
-    if score < 70:
-        return None
-    
-    # Only for specific event types (now includes more types)
-    allowed_types = ["release", "funding", "controversy", "market_trend", "publisher_deal", "other", "discount", "patch_major"]
-    if event_type not in allowed_types:
-        return None
-    
     # Get insight lines for this event type
     lines = INSIGHT_LINES.get(event_type, [])
     if not lines:
         return None
     
-    # Select line based on score (higher score = more impactful line)
-    # Simple selection: use score to pick line index
-    line_index = min(score - 70, len(lines) - 1)  # Score 70-84 -> index 0-14, capped at len-1
-    line_index = line_index % len(lines)  # Wrap around if needed
+    # Select line based on score
+    # Low scores (32-54): more neutral, informative (first 1-2 lines)
+    # Medium scores (55-69): light humor (middle lines)
+    # High scores (70+): more impactful, smart humor (all lines)
+    
+    if score >= 70:
+        # High score: use full range of lines
+        line_index = (score - 70) % len(lines)
+    elif score >= 55:
+        # Medium score: use middle lines (lighter humor)
+        mid_start = len(lines) // 3
+        mid_end = (len(lines) * 2) // 3
+        mid_range = max(1, mid_end - mid_start)
+        line_index = mid_start + ((score - 55) % mid_range)
+    else:
+        # Low score: use first lines (most neutral)
+        # Use first 1-2 lines for very low scores
+        num_neutral = min(2, len(lines))
+        line_index = (score - 32) % num_neutral if num_neutral > 0 else 0
+    
+    # Ensure index is valid
+    line_index = min(line_index, len(lines) - 1)
     
     insight = lines[line_index]
     
