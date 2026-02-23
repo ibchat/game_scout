@@ -204,8 +204,19 @@ def format_telegram_message(
     # Build message parts - PROFESSIONAL EDITORIAL FORMAT
     message_parts = []
     
-    # Clean and normalize title - remove duplicates, fix grammar
-    if not title or len(title) < 3:
+    # Clean and normalize title - remove duplicates, fix grammar, validate quality
+    if not title or len(title) < 5:
+        title = "Новость Steam"
+    
+    # Check for truncated/garbled titles
+    if title.startswith("•") or title.startswith("-"):
+        # Title starts with bullet - likely truncated, use fallback
+        title = "Новость Steam"
+    elif "Отказ в доступе" in title and "SpyAgyAystem" in title:
+        # Garbled title pattern - use fallback
+        title = "Новость Steam"
+    elif len(title.split()) < 3:
+        # Too few words - likely incomplete
         title = "Новость Steam"
     
     # Remove duplicate words/phrases from title
@@ -218,6 +229,15 @@ def format_telegram_message(
             title_clean.append(word)
             prev_word = word
     title = " ".join(title_clean)
+    
+    # Final validation: ensure title is meaningful
+    if len(title) < 5 or title == "Новость Steam":
+        # If we still don't have a good title, try to extract from what_happened
+        if what_happened and len(what_happened) > 20:
+            # Use first sentence of what_happened as title
+            first_sentence = what_happened.split('.')[0].strip()
+            if len(first_sentence) > 10 and len(first_sentence) < 100:
+                title = first_sentence
     
     # Title line - NO EMOJI, NO BRACKETS, clean title only
     message_parts.append(title)

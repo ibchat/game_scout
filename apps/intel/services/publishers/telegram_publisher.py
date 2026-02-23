@@ -76,6 +76,59 @@ class TelegramPublisher:
         
         return True, None
     
+    def _validate_message_quality(self, message: str, brief: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        """
+        Validate message quality before publishing.
+        
+        Returns:
+            (is_valid, error_reason)
+        """
+        # Check title quality
+        title = brief.get("title", "").strip()
+        if not title or len(title) < 5:
+            return False, "Title too short or empty"
+        
+        # Check for truncated/meaningless titles
+        if title.startswith("•") or title.startswith("-"):
+            return False, "Title starts with bullet point (likely truncated)"
+        
+        # Check for common truncation patterns
+        truncation_patterns = [
+            "Отказ в доступе",  # Access denied (likely error)
+            "SpyAgyAystem",  # Garbled text
+            len(title.split()) < 3,  # Too few words
+        ]
+        if any(truncation_patterns):
+            # More sophisticated check: if title has less than 3 meaningful words
+            words = [w for w in title.split() if len(w) > 2]
+            if len(words) < 3:
+                return False, f"Title has too few meaningful words: {title[:50]}"
+        
+        # Check key points quality
+        key_points = brief.get("key_points", [])
+        for kp in key_points:
+            kp_str = str(kp).strip()
+            # Check if key point is truncated (starts mid-sentence)
+            if kp_str.startswith("то ") or kp_str.startswith("• то "):
+                return False, f"Key point truncated: {kp_str[:50]}"
+            # Check if key point is too short or meaningless
+            if len(kp_str) < 10:
+                return False, f"Key point too short: {kp_str}"
+            # Check for garbled text
+            if "SpyAgyAystem" in kp_str or "XDA" in kp_str and len(kp_str) < 30:
+                return False, f"Key point appears garbled: {kp_str[:50]}"
+        
+        # Check message has meaningful content
+        if len(message) < 50:
+            return False, "Message too short"
+        
+        # Check for meaningful content (not just URLs and metadata)
+        content_words = [w for w in message.split() if not w.startswith("http") and len(w) > 2]
+        if len(content_words) < 10:
+            return False, "Message has too little meaningful content"
+        
+        return True, None
+    
     def _format_message(self, event: IntelEvent, brief: Optional[Dict[str, Any]] = None) -> str:
         """
         Format event as structured Telegram message with country tags, category, and importance badge.
@@ -316,6 +369,34 @@ class TelegramPublisher:
         
         # Format message
         message = self._format_message(event, brief)
+        
+        # Validate message quality BEFORE cleanup
+        is_valid, quality_error = self._validate_message_quality(message, brief)
+        if not is_valid:
+            logger.warning(f"Event {event.id} failed quality check: {quality_error}")
+            skip_payload = {
+                "event_id": str(event.id),
+                "source_url": brief.get("source_url", ""),
+                "quality_error": quality_error,
+                "reason": "quality_check_failed",
+                "title": brief.get("title", "")[:100],
+                "message_preview": message[:200]
+            }
+            skip_log = IntelPublishLog(
+                event_id=event.id,
+                channel_id="free",
+                telegram_message_id="",
+                status="skipped",
+                error=f"quality_check_failed: {quality_error}",
+                payload=skip_payload
+            )
+            self.db.add(skip_log)
+            self.db.commit()
+            return PublishResult(
+                success=False,
+                status="skipped",
+                error=f"quality_check_failed: {quality_error}"
+            )
         
         # Extract source URL BEFORE cleanup (to preserve it)
         import re
