@@ -18,6 +18,10 @@ INSIGHT_LINES = {
         "Ранний доступ продолжает доказывать свою эффективность.",
         "Ещё один релиз, который может изменить правила игры.",
         "Индустрия не стоит на месте — это видно по каждому релизу.",
+        "Новые игры — это всегда повод для обсуждения.",
+        "Релиз на Steam — это уже событие само по себе.",
+        "Каждый релиз добавляет что-то новое в экосистему.",
+        "Steam продолжает быть главной площадкой для релизов.",
     ],
     "funding": [
         "Инвесторы по-прежнему верят, что следующий хит уже где-то рядом.",
@@ -62,6 +66,10 @@ INSIGHT_LINES = {
         "Распродажи продолжают привлекать внимание геймеров.",
         "Снижение цены может открыть игру для новой аудитории.",
         "Скидки показывают, что разработчики думают о игроках.",
+        "Распродажа — это шанс для игроков и для разработчиков.",
+        "Скидки создают ажиотаж, и это работает.",
+        "Снижение цены — это способ привлечь новых игроков.",
+        "Распродажи стали частью игровой культуры.",
     ],
     "patch_major": [
         "Обновления — это признак активной поддержки игры.",
@@ -108,7 +116,8 @@ def _select_contextual_line(
     lines: List[str],
     keywords: List[str],
     event_type: str,
-    score: int
+    score: int,
+    title: Optional[str] = None
 ) -> int:
     """
     Select line index based on context and rotation.
@@ -116,13 +125,14 @@ def _select_contextual_line(
     Uses:
     1. Keywords for contextual relevance
     2. Score for appropriateness level
-    3. Hash-based rotation for variety
+    3. Hash-based rotation for variety (includes title hash for more diversity)
     
     Args:
         lines: Available insight lines
         keywords: Extracted keywords from title/context
         event_type: Event type
         score: Significance score
+        title: Event title (for additional rotation seed)
     
     Returns:
         Line index
@@ -130,8 +140,11 @@ def _select_contextual_line(
     if not lines:
         return 0
     
-    # Create rotation seed from keywords and event type (deterministic but varied)
-    seed_str = f"{event_type}_{'_'.join(sorted(keywords[:3]))}"
+    # Create rotation seed from keywords, event type, and title hash
+    # This ensures different titles get different insights even with same keywords
+    keywords_part = '_'.join(sorted(keywords[:3])) if keywords else "none"
+    title_hash = hashlib.md5((title or "").encode()).hexdigest()[:4] if title else "0000"
+    seed_str = f"{event_type}_{keywords_part}_{title_hash}"
     seed_hash = int(hashlib.md5(seed_str.encode()).hexdigest()[:8], 16)
     
     # Score-based filtering: which lines are appropriate
@@ -199,7 +212,7 @@ def generate_insight_line(
     keywords = _extract_keywords(text_for_keywords)
     
     # Select line using context and rotation
-    line_index = _select_contextual_line(lines, keywords, event_type, score)
+    line_index = _select_contextual_line(lines, keywords, event_type, score, title)
     
     insight = lines[line_index]
     
