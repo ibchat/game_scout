@@ -155,12 +155,19 @@ class TelegramPublisher:
             # Clean HTML tags from message for Telegram HTML parse_mode
             # Telegram HTML parser is strict and doesn't support all tags
             import re
-            # Remove unsupported HTML tags but keep text content
+            # Remove ALL HTML tags but keep text content
             message_clean = re.sub(r'<br\s*/?>', '\n', message, flags=re.IGNORECASE)
             message_clean = re.sub(r'</?ul[^>]*>', '', message_clean, flags=re.IGNORECASE)
             message_clean = re.sub(r'</?li[^>]*>', '• ', message_clean, flags=re.IGNORECASE)
-            message_clean = re.sub(r'<[^>]+>', '', message_clean)  # Remove any remaining HTML tags
-            # Escape HTML entities
+            # Remove all HTML tags including <a>, <font>, etc.
+            message_clean = re.sub(r'<[^>]+>', '', message_clean)
+            # Remove HTML entities and decode them
+            message_clean = message_clean.replace('&nbsp;', ' ')
+            message_clean = message_clean.replace('&amp;', '&')
+            message_clean = message_clean.replace('&lt;', '<')
+            message_clean = message_clean.replace('&gt;', '>')
+            message_clean = message_clean.replace('&quot;', '"')
+            # Escape HTML entities for Telegram
             message_clean = message_clean.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             
             url = f"{self.base_url}/sendMessage"
