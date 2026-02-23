@@ -263,29 +263,52 @@ def format_telegram_message(
         main_content = main_content.replace('&gt;', '>')
         main_content = main_content.replace('&quot;', '"')
         
-        # Remove duplicate sentences
-        sentences = re.split(r'[.!?]\s+', main_content)
-        seen = set()
-        unique_sentences = []
-        for sent in sentences:
-            sent_clean = sent.strip()
-            if sent_clean:
-                sent_normalized = re.sub(r'[^\w\s]', '', sent_clean.lower())
-                sent_normalized = re.sub(r'\s+', ' ', sent_normalized).strip()
-                if sent_normalized and sent_normalized not in seen:
-                    unique_sentences.append(sent_clean)
-                    seen.add(sent_normalized)
+        # CRITICAL: Check if main_content is too similar to title (editorial quality)
+        title_normalized = re.sub(r'[^\w\s]', '', title.lower())
+        title_normalized = re.sub(r'\s+', ' ', title_normalized).strip()
+        main_normalized = re.sub(r'[^\w\s]', '', main_content.lower())
+        main_normalized = re.sub(r'\s+', ' ', main_normalized).strip()
         
-        if unique_sentences:
-            main_content = ". ".join(unique_sentences)
-            if main_content and not main_content.endswith(('.', '!', '?')):
-                main_content += "."
+        # Calculate similarity
+        title_words = set(title_normalized.split())
+        main_words_set = set(main_normalized.split())
+        if title_words:
+            similarity = len(title_words & main_words_set) / len(title_words)
+            if similarity > 0.8:  # More than 80% overlap - skip main_content
+                main_content = ""
+                main_words = set()
+        
+        if main_content:
+            # Remove duplicate sentences
+            sentences = re.split(r'[.!?]\s+', main_content)
+            seen = set()
+            unique_sentences = []
+            for sent in sentences:
+                sent_clean = sent.strip()
+                if sent_clean:
+                    sent_normalized = re.sub(r'[^\w\s]', '', sent_clean.lower())
+                    sent_normalized = re.sub(r'\s+', ' ', sent_normalized).strip()
+                    # Also check similarity to title
+                    sent_words = set(sent_normalized.split())
+                    if sent_words:
+                        sent_similarity = len(title_words & sent_words) / len(sent_words) if sent_words else 0
+                        if sent_similarity < 0.7 and sent_normalized not in seen:  # Less than 70% overlap with title
+                            unique_sentences.append(sent_clean)
+                            seen.add(sent_normalized)
             
-            # Final cleanup - remove extra spaces
-            main_content = re.sub(r'\s+', ' ', main_content).strip()
-            
-            message_parts.append(main_content)
-            message_parts.append("")  # Empty line
+            if unique_sentences:
+                main_content = ". ".join(unique_sentences)
+                if main_content and not main_content.endswith(('.', '!', '?')):
+                    main_content += "."
+                
+                # Final cleanup - remove extra spaces
+                main_content = re.sub(r'\s+', ' ', main_content).strip()
+                
+                message_parts.append(main_content)
+                message_parts.append("")  # Empty line
+            else:
+                main_content = ""
+                main_words = set()
     
     # Why it matters - only if adds value and not duplicate
     if why_it_matters and len(why_it_matters) > 20:
