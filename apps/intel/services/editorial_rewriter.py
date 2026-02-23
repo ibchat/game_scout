@@ -279,7 +279,22 @@ def rewrite_editorial_ru(
     # Step 4: Remove double spaces
     text = remove_double_spaces(text)
     
-    # Step 5: Final cleanup - remove any remaining artifacts
+    # Step 5: Fix common bad translations
+    # Fix "не помещает зуб" -> "не может конкурировать" or similar
+    bad_translations = {
+        r'\bне\s+помещает\s+зуб\b': 'не может конкурировать',
+        r'\bпомещает\s+зуб\b': 'конкурирует',
+        r'\bне\s+помещает\b': 'не может',
+        r'\bпомещает\b': 'может',
+        # Fix other common bad translations
+        r'\bбыл\s+выпущен\s+в\s+продажу\b': 'вышел в продажу',
+        r'\bбыла\s+выпущена\s+в\s+продажу\b': 'вышла в продажу',
+        r'\bбыло\s+выпущено\s+в\s+продажу\b': 'вышло в продажу',
+    }
+    for pattern, replacement in bad_translations.items():
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    
+    # Step 6: Final cleanup - remove any remaining artifacts
     text = re.sub(r"([а-яёА-ЯЁ])\s*['']([a-z]+)", r'\1 \2', text)  # Fix remaining mixed artifacts
     text = re.sub(r'\s+', ' ', text)
     text = text.strip()

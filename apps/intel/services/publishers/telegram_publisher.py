@@ -310,6 +310,20 @@ class TelegramPublisher:
         # Format message
         message = self._format_message(event, brief)
         
+        # Extract source URL BEFORE cleanup (to preserve it)
+        import re
+        source_url_match = re.search(r'Источник:\s*(https?://[^\s]+)', message)
+        source_url = source_url_match.group(1) if source_url_match else None
+        
+        # If no source URL found, try to get it from brief or event
+        if not source_url:
+            source_url = brief.get("source_url", "") if brief else ""
+            if not source_url and hasattr(event, 'sources') and event.sources:
+                if isinstance(event.sources, list) and event.sources:
+                    source_url = event.sources[0]
+                else:
+                    source_url = str(event.sources)
+        
         # Editorial quality checks (hard rules before publication)
         from apps.intel.services.editorial_rewriter import validate_editorial_quality, enforce_editorial_quality, rewrite_editorial_ru
         
@@ -319,13 +333,30 @@ class TelegramPublisher:
         # Pass 2: Additional cleanup for any remaining artifacts
         message = rewrite_editorial_ru(message, event_type=event.event_type, score=event.significance_score if hasattr(event, 'significance_score') else 0)
         
-        # Final cleanup: remove any remaining HTML/URL fragments
-        import re
+        # Final cleanup: remove any remaining HTML (but preserve source URL section)
         message = re.sub(r'<[^>]+>', '', message)  # Remove any remaining HTML
-        message = re.sub(r'https?://[^\s]+', '', message)  # Remove URLs
+        # Remove image URLs (but not source URLs)
         message = re.sub(r'[a-zA-Z0-9_-]+\.(jpg|png|gif|webp|jpeg)\?[^\s]*', '', message, flags=re.IGNORECASE)  # Remove image URLs
         message = re.sub(r'\s+', ' ', message)  # Normalize whitespace
         message = message.strip()
+        
+        # CRITICAL FIX: Ensure source URL is present at the end
+        # Remove old "Источник:" line if exists (might be empty or broken)
+        message = re.sub(r'Источник:.*?$', '', message, flags=re.MULTILINE).strip()
+        # Add proper source URL at the end
+        if source_url and source_url.strip():
+            message = message.rstrip() + "\n\nИсточник:\n" + source_url.strip()
+        else:
+            # Try to find any URL in the original brief/event
+            if brief and brief.get("source_url"):
+                message = message.rstrip() + "\n\nИсточник:\n" + brief["source_url"].strip()
+            elif hasattr(event, 'sources') and event.sources:
+                if isinstance(event.sources, list) and event.sources:
+                    message = message.rstrip() + "\n\nИсточник:\n" + event.sources[0].strip()
+                else:
+                    message = message.rstrip() + "\n\nИсточник:\n" + str(event.sources).strip()
+            else:
+                message = message.rstrip() + "\n\nИсточник: нет данных"
         
         quality_check = validate_editorial_quality(message)
         if not quality_check["valid"]:
