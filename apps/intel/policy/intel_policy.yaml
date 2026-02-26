@@ -115,8 +115,8 @@ telegram_template:
 
 # Rate limits
 limits:
-  max_posts_per_hour: 5
-  max_posts_per_day: 30
+  max_posts_per_hour: 20  # Temporarily increased for testing (was 5)
+  max_posts_per_day: 100  # Temporarily increased for testing (was 30)
 
 # Moderation rules
 moderation:

@@ -52,15 +52,18 @@ class TelegramPublisher:
         """Check if rate limits allow publishing"""
         policy = load_policy()
         
-        # Get recent publish count
+        # Get recent publish count - ONLY count successfully published posts
         one_hour_ago = datetime.utcnow() - timedelta(hours=1)
         one_day_ago = datetime.utcnow() - timedelta(days=1)
         
+        # CRITICAL: Only count posts with status="published" to avoid counting skipped/failed posts
         recent_publishes = self.db.query(IntelPublishLog).filter(
+            IntelPublishLog.status == "published",
             IntelPublishLog.published_at >= one_hour_ago
         ).count()
         
         daily_publishes = self.db.query(IntelPublishLog).filter(
+            IntelPublishLog.status == "published",
             IntelPublishLog.published_at >= one_day_ago
         ).count()
         
@@ -536,13 +539,17 @@ class TelegramPublisher:
             "repost_test": is_repost_test
         }
         
+        # Set published_at explicitly for successful publishes (for rate limiting)
+        publish_time = datetime.utcnow() if success and message_id else None
+        
         publish_log = IntelPublishLog(
             event_id=event.id,
             channel_id="free",  # Single channel
             telegram_message_id=message_id or "",
             payload=payload,
             status="published" if success else "failed",
-            error="repost_test" if is_repost_test else error  # Mark repost_test in error field
+            error="repost_test" if is_repost_test else error,  # Mark repost_test in error field
+            published_at=publish_time if publish_time else datetime.utcnow()  # Explicitly set for successful publishes
         )
         self.db.add(publish_log)
         
@@ -550,7 +557,7 @@ class TelegramPublisher:
             # Update event
             event.publish_status = "published"
             event.publish_channel = "free"
-            event.published_at = datetime.utcnow()
+            event.published_at = publish_time
             event.telegram_message_id = message_id
             score = event.significance_score if hasattr(event, 'significance_score') else 0
             if is_repost_test:
